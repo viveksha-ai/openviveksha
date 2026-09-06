@@ -1,0 +1,41 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "OpenViveksha canvas file",
+  "type": "object",
+  "properties": {
+    "spec": { "const": "openviveksha/canvas" },
+    "version": { "type": "string", "pattern": "^0\\.1\\." },
+    "name": { "type": "string" },
+    "nodes": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "properties": {
+          "id": { "type": "string", "pattern": "^[a-zA-Z0-9_-]+$" },
+          "type": { "type": "string" },
+          "position": {
+            "type": "object",
+            "properties": { "x": { "type": "number" }, "y": { "type": "number" } },
+            "required": ["x", "y"]
+          },
+          "data": { "type": "object" }
+        },
+        "required": ["id", "type", "data"]
+      }
+    },
+    "edges": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "properties": {
+          "sourceId": { "type": "string" },
+          "sourcePort": { "type": "string" },
+          "targetId": { "type": "string" },
+          "targetPort": { "type": "string" }
+        },
+        "required": ["sourceId", "targetId"]
+      }
+    }
+  },
+  "required": ["spec", "version", "name", "nodes", "edges"]
+}

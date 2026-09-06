@@ -1,0 +1,189 @@
+{
+  "spec": "openviveksha/nodes",
+  "version": "0.1.0",
+  "description": "OpenViveksha node type registry. Each node type defines config fields (JSON Schema), ports, and execution semantics. Port types: TXT, PROMPT, TOOLS, ANY. EMBED, AUDIO, HARMONICS, SECURITY, FILES are reserved for future versions.",
+  "portTypes": {
+    "TXT": "Plain text (string).",
+    "PROMPT": "A composed prompt object: { system, messages, tools? }. Produced by role/tools, consumed by llm/tools.",
+    "TOOLS": "Tool definitions from an MCP server (array of { name, description, inputSchema }).",
+    "ANY": "Wildcard; value type unconstrained."
+  },
+  "nodeTypes": [
+    {
+      "type": "channel",
+      "label": "Input Channel",
+      "category": "io",
+      "summary": "External trigger: webhook (HTTP POST with secret) or local webchat. Emits { message } on trigger.",
+      "dataSchema": {
+        "type": "object",
+        "properties": {
+          "name": { "type": "string" },
+          "kind": { "type": "string", "enum": ["webhook", "webchat"] },
+          "config": {
+            "type": "object",
+            "properties": {
+              "secret": { "type": "string", "description": "Shared secret; required header X-Ingress-Secret on webhook POST." }
+            },
+            "required": ["secret"]
+          },
+          "webhookUrl": { "type": "string", "readOnly": true, "description": "Assigned by runtime when active." },
+          "active": { "type": "boolean", "default": false }
+        },
+        "required": ["name", "kind", "config"]
+      },
+      "ports": {
+        "inputs": [
+          { "name": "reply", "type": "TXT", "required": false }
+        ],
+        "outputs": [
+          { "name": "message", "type": "TXT" }
+        ]
+      },
+      "execute": {
+        "outputs": "When triggered: { message }. When a value arrives on `reply`, the channel may forward/deliver it (implementation-defined in v0.1: stored and visible via API)."
+      }
+    },
+    {
+      "type": "role",
+      "label": "Role",
+      "category": "agent",
+      "summary": "Composes the system prompt (SOUL) for this agent from the incoming message. Produces a PROMPT for llm/tools.",
+      "dataSchema": {
+        "type": "object",
+        "properties": {
+          "name": { "type": "string" },
+          "soulPrompt": { "type": "string", "encrypted": true, "description": "Agent identity / instructions (SOUL)." },
+          "mode": { "type": "string", "enum": ["chat", "generate"], "default": "chat", "description": "chat: conversational; generate: single-shot content generation." },
+          "systemPrompt": { "type": "string", "encrypted": true, "description": "Optional extra system instructions appended to soulPrompt." },
+          "temperature": { "type": "number", "minimum": 0, "maximum": 2 }
+        },
+        "required": ["name", "soulPrompt", "mode"]
+      },
+      "ports": {
+        "inputs": [
+          { "name": "message", "type": "TXT", "required": true },
+          { "name": "reply", "type": "TXT", "required": false }
+        ],
+        "outputs": [
+          { "name": "prompt", "type": "PROMPT" },
+          { "name": "reply", "type": "TXT" }
+        ]
+      },
+      "execute": {
+        "outputs": "{ prompt: { system, messages } }. On the `reply` input: passes the reply through (loop back-edge delivery)."
+      }
+    },
+    {
+      "type": "provider-llm",
+      "label": "LLM Provider",
+      "category": "ai",
+      "summary": "Calls an OpenAI-compatible or Ollama chat endpoint with the composed PROMPT. Returns { reply }.",
+      "dataSchema": {
+        "type": "object",
+        "properties": {
+          "name": { "type": "string" },
+          "format": { "type": "string", "enum": ["CHAT", "GENERATION"], "default": "CHAT" },
+          "provider": { "type": "string", "enum": ["ollama", "openai"], "default": "ollama" },
+          "baseUrl": { "type": "string", "description": "e.g. http://127.0.0.1:11434/v1 (ollama) or https://api.openai.com/v1" },
+          "apiKey": { "type": "string", "encrypted": true },
+          "model": { "type": "string" },
+          "think": { "type": "string", "enum": ["off", "low", "mid", "hi"], "default": "off" },
+          "temperature": { "type": "number" },
+          "maxTokens": { "type": "number", "description": "Guideline: >= 8192 when the graph uses tool calls — smaller values truncate JSON tool arguments." }
+        },
+        "required": ["name", "provider", "baseUrl", "model"]
+      },
+      "ports": {
+        "inputs": [
+          { "name": "prompt", "type": "PROMPT", "required": true }
+        ],
+        "outputs": [
+          { "name": "reply", "type": "TXT" }
+        ]
+      },
+      "execute": {
+        "outputs": "{ reply } — model text; when the prompt carries tools and the model returns tool_calls, tools nodes consume them.",
+        "trace": "Reports tokensIn/tokensOut via trace context."
+      }
+    },
+    {
+      "type": "tools",
+      "label": "Tool Loop",
+      "category": "agent",
+      "summary": "Agentic tool loop: takes PROMPT + TOOLS, runs LLM <-> tool-call iterations until a final text reply or maxIterations.",
+      "dataSchema": {
+        "type": "object",
+        "properties": {
+          "name": { "type": "string" },
+          "maxIterations": { "type": "number", "default": 10 }
+        },
+        "required": ["name"]
+      },
+      "ports": {
+        "inputs": [
+          { "name": "prompt", "type": "PROMPT", "required": true },
+          { "name": "tools", "type": "TOOLS", "required": false, "multiple": true },
+          { "name": "reply", "type": "TXT", "required": false, "description": "LLM reply passed through the loop (back-edge)." }
+        ],
+        "outputs": [
+          { "name": "prompt", "type": "PROMPT", "description": "Prompt augmented with tool schemas." },
+          { "name": "reply", "type": "TXT", "description": "Final reply after tool loop." }
+        ]
+      },
+      "execute": {
+        "outputs": "Without tools input: passthrough prompt, reply passthrough. With tools: executes the tool loop (may invoke MCP tools), final { reply }."
+      }
+    },
+    {
+      "type": "mcp",
+      "label": "MCP Source",
+      "category": "io",
+      "summary": "Connects to an MCP server (stdio or streamable HTTP) and emits its tool definitions on `tools`.",
+      "dataSchema": {
+        "type": "object",
+        "properties": {
+          "name": { "type": "string" },
+          "transport": { "type": "string", "enum": ["stdio", "http"], "default": "stdio" },
+          "command": { "type": "string", "description": "stdio: executable command line." },
+          "url": { "type": "string", "description": "http: server URL (http transport)." },
+          "authToken": { "type": "string", "encrypted": true, "description": "Optional bearer token sent as Authorization header (http)." },
+          "active": { "type": "boolean", "default": false }
+        },
+        "required": ["name", "transport"]
+      },
+      "ports": {
+        "inputs": [],
+        "outputs": [
+          { "name": "tools", "type": "TOOLS" }
+        ]
+      },
+      "execute": {
+        "outputs": "{ tools: [ { name, description, inputSchema } ] } from the connected MCP server; empty when inactive/unreachable (never blocks the graph — see Laws §5)."
+      }
+    },
+    {
+      "type": "chat",
+      "label": "Chat / Output",
+      "category": "io",
+      "summary": "Conversation entry/output node. Typically the run start (seeded with { message }) and the sink for the final reply.",
+      "dataSchema": {
+        "type": "object",
+        "properties": {
+          "name": { "type": "string" }
+        },
+        "required": ["name"]
+      },
+      "ports": {
+        "inputs": [
+          { "name": "reply", "type": "TXT", "required": false }
+        ],
+        "outputs": [
+          { "name": "message", "type": "TXT" }
+        ]
+      },
+      "execute": {
+        "outputs": "{ message } — as start node it is seeded by the executor; otherwise forwards the incoming reply."
+      }
+    }
+  ]
+}

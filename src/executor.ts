@@ -184,7 +184,10 @@ export class GraphExecutor {
     return inputs;
   }
 
-  /** laws §7–§8: readiness. Only incoming edges block; optional pending-source waits except `reply`. */
+  /** laws §7–§8: readiness. Only incoming edges make a node ready.
+   * Required: the source must deliver a VALUE on this wire. Optional: wait for
+   * a pending source (§8), unless the port is `reply`; a finished source with
+   * no value means the input is simply absent (§8, run anyway). */
   private isReady(
     nodeId: string,
     mod: NodeModule,
@@ -195,12 +198,15 @@ export class GraphExecutor {
     for (const edge of incomingEdges) {
       const targetPort = mod.ports.inputs.find((p) => p.name === (edge.targetPort ?? ""));
       const isRequired = targetPort?.required ?? true;
+      const neighborOut = outputs.get(edge.sourceId);
+      const sourcePort = edge.sourcePort ?? (neighborOut ? Object.keys(neighborOut)[0] : undefined);
+      const value = neighborOut && sourcePort ? neighborOut[sourcePort] : undefined;
+      if (value !== undefined) continue; // this wire delivers — satisfied
+      if (isRequired) return false;
       if (!outputs.has(edge.sourceId)) {
-        if (isRequired) return false;
-        // §8: optional input whose source is still pending must block too —
-        // otherwise a node runs before its tools source executes.
-        // Exception: `reply` back-edges close cycles; waiting on them would
-        // deadlock (e.g. chat → role → … → reply → chat).
+        // Source still pending: wait, so a node never runs before its tools
+        // source executes. Exception: `reply` back-edges close cycles; waiting
+        // on them would deadlock (e.g. chat → role → … → reply → chat).
         if (remaining.has(edge.sourceId) && targetPort?.name !== "reply") {
           return false;
         }
@@ -243,26 +249,27 @@ export class GraphExecutor {
     // §5 seed: the start node outputs { message } without executing.
     outputs.set(startNodeId, { message });
 
-    const remaining = new Set<string>(nodes.filter((n) => n.id !== startNodeId).map((n) => n.id));
+    // True fixed point (§9): nodes stay in the worklist and re-execute when
+    // their inputs change. The tool loop emerges from this: tools re-prompts →
+    // llm re-runs → final reply → both sides stabilize → done.
+    const worklist = new Set<string>(
+      nodes.filter((n) => n.id !== startNodeId).map((n) => n.id),
+    );
+    const executedSig = new Map<string, string>();
 
     let progress = true;
     let iterations = 0;
-    const maxIterations = nodes.length + 5; // §9: never loop forever
+    const maxIterations = Math.max(nodes.length * 4 + 16, 64); // §9: never loop forever
 
-    while (remaining.size > 0 && progress && iterations < maxIterations) {
+    while (worklist.size > 0 && progress && iterations < maxIterations) {
       progress = false;
       iterations++;
 
-      for (const nodeId of [...remaining]) {
+      for (const nodeId of [...worklist]) {
         const node = nodes.find((n) => n.id === nodeId);
-        if (!node) {
-          remaining.delete(nodeId);
-          progress = true;
-          continue;
-        }
-        const mod = this.registry.getByType(node.type);
-        if (!mod) {
-          remaining.delete(nodeId);
+        const mod = node ? this.registry.getByType(node.type) : undefined;
+        if (!node || !mod) {
+          worklist.delete(nodeId); // nothing to execute — not a failure
           progress = true;
           continue;
         }
@@ -270,14 +277,16 @@ export class GraphExecutor {
         const incomingEdges = edges.filter((e) => e.targetId === nodeId);
         const allEdges = edges.filter((e) => e.sourceId === nodeId || e.targetId === nodeId);
 
-        if (!this.isReady(nodeId, mod, incomingEdges, outputs, remaining)) continue;
+        if (!this.isReady(nodeId, mod, incomingEdges, outputs, worklist)) continue;
 
         const inputs = this.buildInputs(nodeId, allEdges, outputs);
+        const sig = this.inputSignature(inputs);
+        if (executedSig.get(nodeId) === sig && outputs.has(nodeId)) continue; // stable
 
-        const sig = nodeId + ":" + this.inputSignature(inputs);
-        if (this.cache.has(sig)) {
-          outputs.set(nodeId, this.cache.get(sig)!);
-          remaining.delete(nodeId);
+        const cacheKey = nodeId + ":" + sig;
+        if (this.cache.has(cacheKey)) {
+          outputs.set(nodeId, this.cache.get(cacheKey)!);
+          executedSig.set(nodeId, sig);
           progress = true;
           continue;
         }
@@ -314,25 +323,21 @@ export class GraphExecutor {
         const t0 = performance.now();
         try {
           const result = await mod.execute(ctx);
-          this.cache.set(sig, result);
+          this.cache.set(cacheKey, result);
           outputs.set(nodeId, result);
+          executedSig.set(nodeId, sig);
           collector.end(result, performance.now() - t0);
         } catch (err) {
           const msg = err instanceof Error ? err.message : String(err);
           errors.push(`${node.type} (${nodeId.slice(0, 8)}): ${msg}`);
+          executedSig.set(nodeId, sig); // a failed node is stable — no retry spin
           collector.end({}, performance.now() - t0, msg);
-        }
-
-        // A node with optional inputs still awaiting data stays for later waves.
-        const hasPendingOptional = incomingEdges.some((e) => {
-          const tp = mod.ports.inputs.find((p) => p.name === (e.targetPort ?? ""));
-          return !tp?.required && !outputs.has(e.sourceId);
-        });
-        if (!hasPendingOptional) {
-          remaining.delete(nodeId);
         }
         progress = true;
       }
+    }
+    if (iterations >= maxIterations) {
+      errors.push("executor: iteration cap reached (§9) — the graph did not stabilize");
     }
 
     // §10: first resolved reply wins; failures ride along as warnings.

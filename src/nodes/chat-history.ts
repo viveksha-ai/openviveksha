@@ -45,6 +45,14 @@ export function makeChatHistoryNode(store: Store): NodeModule {
       const { canvasId, sessionId, inputs, data } = ctx;
       const depth = typeof data.depth === "number" && data.depth > 0 ? data.depth : 0;
 
+      const reply = inputs["reply"];
+      if (reply != null) {
+        // Reply first: in later waves both prompt (stale) and reply are present;
+        // recording the turn must win over re-injecting the prompt.
+        store.appendTurn(canvasId, sessionId, "assistant", String(reply));
+        return { reply };
+      }
+
       const prompt = inputs["prompt"] as PromptShape | undefined;
       if (prompt && Array.isArray(prompt.messages)) {
         // Prior turns first (current message is already in prompt.messages);
@@ -58,11 +66,6 @@ export function makeChatHistoryNode(store: Store): NodeModule {
         return { prompt: { ...prompt, messages: [...prior, ...prompt.messages] } };
       }
 
-      const reply = inputs["reply"];
-      if (reply != null) {
-        store.appendTurn(canvasId, sessionId, "assistant", String(reply));
-        return { reply };
-      }
       return {};
     },
   };

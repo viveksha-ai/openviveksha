@@ -7,6 +7,14 @@ client. OpenCode, Claude Code, or any MCP host builds an executable agent
 system — nodes, wires, validation, runs, tests — through a local MCP server.
 No SaaS. No cloud. One SQLite file.
 
+<p align="center">
+  <img src="assets/miniagent.png" alt="A minimal agent canvas: chat, role, chat-history and provider-llm nodes wired together" width="720">
+</p>
+
+<p align="center"><sub>A minimal agent canvas — screenshot from the Viveksha PRO canvas UI
+(the commercial edition). OpenViveksha itself is headless: the same graph is
+built and run through MCP or the local HTTP API.</sub></p>
+
 ```text
 YOU (or your AI client):        "Build an agent that digests this repo's
                                  changelog into a weekly post."
@@ -122,6 +130,11 @@ src/                  the runtime (TypeScript, Node 22+, SQLite)
 src/nodes/            the 7 built-in node modules
 examples/demo.mjs     deterministic demo: an MCP client builds an agent
 ```
+
+## Links
+
+- Website: **[viveksha.ru](https://viveksha.ru)** — the Viveksha PRO platform
+- Documentation: **[viveksha.ru/docs](https://viveksha.ru/docs)**
 
 ## License & trademarks
 

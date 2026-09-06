@@ -118,7 +118,7 @@ Your package, your license — see `TRADEMARKS.md` for naming rules.
 
 ```text
 spec/                 the language: node registry, canvas format, laws, MCP contract
-src/                  the runtime (TypeScript, Node 20+, SQLite)
+src/                  the runtime (TypeScript, Node 22+, SQLite)
 src/nodes/            the 7 built-in node modules
 examples/demo.mjs     deterministic demo: an MCP client builds an agent
 ```

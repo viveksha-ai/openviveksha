@@ -125,13 +125,16 @@ export function makeToolsNode(): NodeModule {
       const prev = state.get(nodeId);
       const hash = hashOf(prompt);
       const iterations = prev && prev.lastUserHash === hash ? prev.iterations : 0;
-      state.set(nodeId, { basePrompt: prompt, iterations, lastUserHash: hash });
+      // Keep the tool schemas in the loop state: every re-prompt must carry
+      // them, or the model cannot request further tools in later iterations.
+      const promptWithTools = toolDefs.length > 0 ? { ...prompt, tools: toolDefs } : prompt;
+      state.set(nodeId, { basePrompt: promptWithTools, iterations, lastUserHash: hash });
 
       if (toolDefs.length === 0) {
         // No tools connected: pure passthrough (llm runs bare).
         return { prompt };
       }
-      return { prompt: { ...prompt, tools: toolDefs } };
+      return { prompt: promptWithTools };
     },
   };
 }
@@ -149,13 +152,17 @@ function parseToolCalls(reply: string): ToolCall[] | null {
 }
 
 function flattenTools(raw: unknown): unknown[] {
-  if (raw === undefined) return [];
+  if (raw === undefined || raw === null) return [];
   if (Array.isArray(raw)) {
     return raw.flatMap((v) => flattenTools(v));
   }
   if (raw && typeof raw === "object") {
-    const arr = (raw as { tools?: unknown }).tools;
-    if (Array.isArray(arr)) return arr;
+    const obj = raw as { name?: unknown; inputSchema?: unknown; tools?: unknown };
+    // Canonical TOOLS port value (spec/nodes.schema.json): a tool definition
+    // object { name, description, inputSchema } — or an array of them.
+    if (typeof obj.name === "string" && obj.inputSchema !== undefined) return [raw];
+    // Tolerated wrapper shape: { tools: [...] }.
+    if (Array.isArray(obj.tools)) return flattenTools(obj.tools);
   }
   return [];
 }

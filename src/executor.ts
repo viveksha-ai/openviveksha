@@ -228,8 +228,8 @@ export class GraphExecutor {
     }
     for (const [, state] of byPort) {
       if (state.satisfied) continue;
-      if (state.required && state.pending && !state.isReply) return false; // §8 wait
       if (state.required && !state.pending) return false; // required, never satisfied
+      if (state.pending && !state.isReply) return false; // §8: wait for a pending source (required AND optional)
     }
     return true;
   }
@@ -384,6 +384,24 @@ export class GraphExecutor {
       }
     }
     if (result === null) {
+      // §7: name the required inputs that never received a value.
+      for (const n of nodes) {
+        if (outputs.has(n.id)) continue; // ran (or failed) — its error is already collected
+        const mod = this.registry.getByType(n.type);
+        if (!mod) continue;
+        for (const port of mod.ports.inputs) {
+          if (!port.required) continue;
+          const delivered = edges.some((e) => {
+            if (e.targetId !== n.id || (e.targetPort ?? e.sourcePort) !== port.name) return false;
+            const o = outputs.get(e.sourceId);
+            const sp = e.sourcePort ?? (o ? Object.keys(o)[0] : undefined);
+            return o !== undefined && sp !== undefined && o[sp] !== undefined;
+          });
+          if (!delivered) {
+            errors.push(`laws §7: ${n.type} (${n.id.slice(0, 8)}): required input "${port.name}" never received a value`);
+          }
+        }
+      }
       if (errors.length > 0) {
         result = { reply: "", error: errors.join("; ") };
       } else {

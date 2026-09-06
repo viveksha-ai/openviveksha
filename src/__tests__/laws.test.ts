@@ -10,7 +10,7 @@ import { mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { createRuntime, type Runtime } from "../index.js";
-import type { NodeModule, PortValues } from "../types.js";
+import type { CanvasNode, NodeModule, PortValues } from "../types.js";
 
 let rt: Runtime;
 let dir: string;
@@ -517,5 +517,138 @@ describe("laws.md execution semantics", () => {
     expect(calls[0]!.args).toEqual({ v: 42 });
     expect(res.reply).toBe("tool result used");
     expect(llmCall).toBe(2);
+  });
+
+  // ─── §8 + canonical TOOLS wire: the real tool loop over a real mcp-shaped source ──
+
+  async function runToolGraph(order: "spec" | "guideline") {
+    const { canvasId } = await setup();
+    const llmCalls: string[] = [];
+    const seen: { tools: unknown } = { tools: "unset" };
+    let withToolsTurns = 0;
+    rt.registry.register({
+      type: "test-tool-llm",
+      label: "L",
+      category: "ai",
+      summary: "x",
+      dataSchema: { type: "object", properties: {}, required: [] },
+      ports: {
+        inputs: [{ name: "prompt", type: "PROMPT", required: true }],
+        outputs: [{ name: "reply", type: "TXT", required: false }],
+      },
+      async execute(ctx) {
+        const p = ctx.inputs["prompt"] as { tools?: unknown[]; messages: unknown[] };
+        const hasTools = Array.isArray(p.tools) && p.tools.length > 0;
+        llmCalls.push(hasTools ? "WITH-TOOLS" : "BARE");
+        if (withToolsTurns === 0) {
+          // First call: bare means the tools never reached the prompt (§8 or
+          // flattenTools regression) — the graph must not answer from this.
+          if (!hasTools) return { reply: "BARE-ANSWER(no-tools)" };
+          withToolsTurns = 1;
+          seen.tools = p.tools;
+          return {
+            reply: JSON.stringify({
+              tool_calls: [{ id: "c1", function: { name: "echo", arguments: "{}" } }],
+            }),
+          };
+        }
+        // Follow-up: the re-prompt must carry the tool results.
+        expect(p.messages.some((m) => (m as { role?: string }).role === "tool")).toBe(true);
+        return { reply: "FINAL-WITH-TOOLS" };
+      },
+    } as NodeModule);
+    rt.registry.register({
+      type: "test-mcp-src",
+      label: "M",
+      category: "io",
+      summary: "x",
+      dataSchema: { type: "object", properties: {}, required: [] },
+      ports: { inputs: [], outputs: [{ name: "tools", type: "TOOLS", required: false }] },
+      async execute() {
+        // Canonical TOOLS port value (spec/nodes.schema.json): a RAW array of
+        // tool definitions — exactly what the mcp node emits.
+        return { tools: [{ name: "echo", description: "echo", inputSchema: { type: "object" } }] };
+      },
+    } as NodeModule);
+
+    const { GraphExecutor } = await import("../executor.js");
+    const canvasApi = {
+      getNode: (id: string) => rt.store.getNode(id) ?? null,
+      getNeighbors: () => [],
+      getEdges: (cid: string) => rt.store.listEdges(cid),
+    };
+    const stubExecutor = new GraphExecutor(
+      rt.registry,
+      canvasApi,
+      (cid: string) => rt.store.listNodes(cid),
+      (cid: string) => rt.store.listEdges(cid),
+      { call: async (_name: string, args: unknown) => ({ echoed: args }) },
+    );
+
+    // Creation orders: "spec" mirrors spec/canvas-spec.md (tools BEFORE its
+    // mcp source); "guideline" declares the producer first.
+    const chat = rt.store.createNode(canvasId, "chat", { name: "C" });
+    const role = rt.store.createNode(canvasId, "role", { name: "R", soulPrompt: "S" });
+    let toolsN: CanvasNode;
+    let mcpN: CanvasNode;
+    if (order === "spec") {
+      toolsN = rt.store.createNode(canvasId, "tools", { name: "T", maxIterations: 5 });
+      mcpN = rt.store.createNode(canvasId, "test-mcp-src", {});
+    } else {
+      mcpN = rt.store.createNode(canvasId, "test-mcp-src", {});
+      toolsN = rt.store.createNode(canvasId, "tools", { name: "T", maxIterations: 5 });
+    }
+    const llmN = rt.store.createNode(canvasId, "test-tool-llm", {});
+    rt.store.createEdge(canvasId, chat.id, role.id, "message", "message");
+    rt.store.createEdge(canvasId, role.id, toolsN.id, "prompt", "prompt");
+    rt.store.createEdge(canvasId, mcpN.id, toolsN.id, "tools", "tools");
+    rt.store.createEdge(canvasId, toolsN.id, llmN.id, "prompt", "prompt");
+    rt.store.createEdge(canvasId, llmN.id, toolsN.id, "reply", "reply");
+    rt.store.createEdge(canvasId, toolsN.id, chat.id, "reply", "reply");
+
+    const res = await stubExecutor.run({ canvasId, startNodeId: chat.id, message: "go", sessionId: "s-tools" });
+    return { res, llmCalls, sawTools: seen.tools };
+  }
+
+  it("§8+§3: real tools loop over a canonical raw TOOLS array — spec example order (tools BEFORE mcp)", async () => {
+    const { res, llmCalls, sawTools } = await runToolGraph("spec");
+    expect(res.reply).toBe("FINAL-WITH-TOOLS");
+    expect(sawTools).toEqual([{ name: "echo", description: "echo", inputSchema: { type: "object" } }]);
+    expect(llmCalls).toEqual(["WITH-TOOLS", "WITH-TOOLS"]); // never ran bare, never terminated early
+  });
+
+  it("§8: same tool graph, guideline order (mcp BEFORE tools) — identical result", async () => {
+    const { res, llmCalls, sawTools } = await runToolGraph("guideline");
+    expect(res.reply).toBe("FINAL-WITH-TOOLS");
+    expect(sawTools).toEqual([{ name: "echo", description: "echo", inputSchema: { type: "object" } }]);
+    expect(llmCalls).toEqual(["WITH-TOOLS", "WITH-TOOLS"]);
+  });
+
+  it("§7: a run that produced no reply names the unsatisfied required input", async () => {
+    const { canvasId } = await setup();
+    rt.registry.register({
+      type: "test-req",
+      label: "Q",
+      category: "io",
+      summary: "x",
+      dataSchema: { type: "object", properties: {}, required: [] },
+      ports: {
+        inputs: [{ name: "in", type: "TXT", required: true }],
+        outputs: [{ name: "out", type: "TXT", required: false }],
+      },
+      async execute() {
+        return {};
+      },
+    } as NodeModule);
+    const chat = rt.store.createNode(canvasId, "chat", { name: "C" });
+    const x = rt.store.createNode(canvasId, "test-req", { name: "X" });
+    const y = rt.store.createNode(canvasId, "test-req", { name: "Y" });
+    rt.store.createEdge(canvasId, chat.id, x.id, "message", "in");
+    // X emits no "out" value → Y's required input never receives a value.
+    rt.store.createEdge(canvasId, x.id, y.id, "out", "in");
+    const res = await run(canvasId, chat.id, "hi");
+    expect(res.reply).toBe("");
+    expect(res.error).toContain('required input "in"');
+    expect(res.error).toContain("never received a value");
   });
 });

@@ -13,6 +13,11 @@ an actionable error saves a retry round-trip.
 
 ## Tools
 
+### create_canvas
+```json
+{ "name": "demo-agent" } → { "ok": true, "canvas": { "id": "cv_…", "name": "demo-agent" } }
+```
+
 ### list_nodes
 ```json
 {} → { "ok": true, "types": [ { "type": "role", "label": "Role", "summary": "…",
@@ -115,7 +120,7 @@ client verifies the agent it just built actually works.
 
 ## Client workflow (what a competent AI client does)
 
-1. `list_nodes` / `get_node_schema` — learn the vocabulary.
+1. `create_canvas` — make a canvas; `list_nodes` / `get_node_schema` — learn the vocabulary.
 2. `create_node` ×N — read the effective data in each response.
 3. `create_edge` with explicit ports.
 4. `validate_canvas` — fix warnings/errors it understands.

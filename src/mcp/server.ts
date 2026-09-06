@@ -35,6 +35,16 @@ export function createMcpServer(rt: Runtime): McpServer {
   );
 
   server.registerTool(
+    "create_canvas",
+    {
+      title: "Create canvas",
+      description: "Create an empty canvas. Returns its id — pass it to create_node.",
+      inputSchema: { name: z.string() },
+    },
+    async ({ name }) => json({ ok: true, canvas: svc.createCanvas(name) }),
+  );
+
+  server.registerTool(
     "create_node",
     {
       title: "Create node",

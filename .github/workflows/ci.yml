@@ -1,0 +1,27 @@
+name: ci
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    strategy:
+      matrix:
+        node: [20, 22]
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: ${{ matrix.node }}
+      - run: npm ci
+      - name: Typecheck (strict)
+        run: npx tsc --noEmit
+      - name: Tests (laws + platform)
+        run: npm test
+      - name: Build
+        run: npm run build
+      - name: Quickstart smoke — MCP surface works from a clean build
+        run: node examples/demo.mjs --no-llm

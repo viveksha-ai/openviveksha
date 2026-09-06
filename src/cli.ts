@@ -15,19 +15,21 @@ import { createRuntime } from "./index.js";
 import { createHttpServer } from "./server.js";
 import { serveMcpStdio } from "./mcp/server.js";
 
-const { values } = parseArgs({
+const { values, positionals } = parseArgs({
+  allowPositionals: true,
   options: {
-    mode: { type: "string", default: "serve" }, // serve | mcp
+    mode: { type: "string", default: "" }, // serve | mcp (или позиционно)
     port: { type: "string", default: "8031" },
     host: { type: "string", default: "127.0.0.1" },
     db: { type: "string", default: "./openviveksha.sqlite" },
   },
 });
 
+const mode = positionals[0] ?? values.mode ?? "serve";
 const dbPath = resolve(values.db!);
 const rt = createRuntime(dbPath);
 
-if (values.mode === "mcp") {
+if (mode === "mcp") {
   await serveMcpStdio(rt);
 } else {
   const port = Number(values.port);

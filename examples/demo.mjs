@@ -91,8 +91,10 @@ if (noLlm) {
 }
 
 // 6. Run — the agent answers, history records, reply terminates the run (§10).
-const run1 = await call("run_canvas", { canvasId: canvasId, message: "Say hi in five words." });
+// One sessionId across both runs: chat-history memory is per-session.
+const sessionId = "demo_" + crypto.randomUUID();
+const run1 = await call("run_canvas", { canvasId: canvasId, message: "Say hi in five words.", sessionId });
 console.log(`6. run 1 reply: ${run1.reply}`);
-const run2 = await call("run_canvas", { canvasId: canvasId, message: "What did I just ask?" });
+const run2 = await call("run_canvas", { canvasId: canvasId, message: "What did I just ask?", sessionId });
 console.log(`   run 2 (with memory): ${run2.reply}`);
 await client.close();

@@ -9,11 +9,14 @@
 import { Store } from "./store.js";
 import { NodeRegistry } from "./registry.js";
 import { GraphExecutor } from "./executor.js";
+import { McpHub } from "./mcp/hub.js";
+import { registerBuiltins } from "./nodes/index.js";
 import type { CanvasApi, CanvasEdge, CanvasNode } from "./types.js";
 
 export { Store } from "./store.js";
 export { NodeRegistry } from "./registry.js";
 export { GraphExecutor } from "./executor.js";
+export { McpHub } from "./mcp/hub.js";
 export type { RunResult, RunRequest } from "./executor.js";
 export type { NodeTypeInfo } from "./registry.js";
 
@@ -21,11 +24,13 @@ export interface Runtime {
   store: Store;
   registry: NodeRegistry;
   executor: GraphExecutor;
+  mcpHub: McpHub;
 }
 
 export function createRuntime(dbPath: string): Runtime {
   const store = new Store(dbPath);
   const registry = new NodeRegistry();
+  const mcpHub = new McpHub();
 
   const canvasApi = {
     getNode(nodeId: string): CanvasNode | null {
@@ -58,7 +63,10 @@ export function createRuntime(dbPath: string): Runtime {
     canvasApi,
     (canvasId: string) => store.listNodes(canvasId),
     (canvasId: string) => store.listEdges(canvasId),
+    { call: (toolName: string, args?: unknown) => mcpHub.callTool(toolName, args) },
   );
 
-  return { store, registry, executor };
+  registerBuiltins(registry, store, mcpHub);
+
+  return { store, registry, executor, mcpHub };
 }

@@ -103,6 +103,11 @@ export interface TraceContext {
   addMeta(key: string, value: unknown): void;
 }
 
+/** Tool calls through the runtime's active MCP connections (mcp hub). */
+export interface ToolsApi {
+  call(toolName: string, args?: unknown): Promise<unknown>;
+}
+
 export interface ExecutionContext {
   nodeId: string;
   canvasId: string;
@@ -114,6 +119,8 @@ export interface ExecutionContext {
   canvasApi: CanvasApi;
   httpApi: HttpApi;
   trace?: TraceContext;
+  /** Present when the runtime has MCP connections; used by the tools loop. */
+  toolsApi?: ToolsApi;
 }
 
 // ─── Tracing (laws §13) ───────────────────────────────────────────────────────

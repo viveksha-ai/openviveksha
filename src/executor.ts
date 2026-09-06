@@ -15,6 +15,7 @@ import type {
   ModuleLogger,
   NodeModule,
   PortValues,
+  ToolsApi,
   Trace,
   TraceContext,
   TraceObservation,
@@ -111,6 +112,7 @@ export class GraphExecutor {
     private canvasApi: CanvasApi,
     private listNodes: (canvasId: string) => CanvasNode[],
     private listEdges: (canvasId: string) => CanvasEdge[],
+    private toolsApi?: ToolsApi,
   ) {}
 
   onInvalidate(hook: (nodeId: string) => void): void {
@@ -305,6 +307,7 @@ export class GraphExecutor {
               ).json(),
           },
           trace: collector.context,
+          toolsApi: this.toolsApi,
         };
 
         collector.begin(nodeId, node.type, inputs);

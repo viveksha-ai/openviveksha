@@ -327,7 +327,7 @@ describe("laws.md execution semantics", () => {
     expect(obs.output["reply"]).toContain("...[truncated]");
   });
 
-  it("role node: composes system from soulPrompt (+systemPrompt)", async () => {
+  it("role node: composes system from soulPrompt", async () => {
     const { canvasId } = await setup();
     const capture: { last?: unknown } = {};
     rt.registry.register(captureLlm(capture));
@@ -335,7 +335,6 @@ describe("laws.md execution semantics", () => {
     const role = rt.store.createNode(canvasId, "role", {
       name: "R",
       soulPrompt: "SOUL-1",
-      systemPrompt: "EXTRA-2",
       mode: "chat",
     });
     const llm = rt.store.createNode(canvasId, "test-capture-llm", {});
@@ -343,9 +342,81 @@ describe("laws.md execution semantics", () => {
     rt.store.createEdge(canvasId, role.id, llm.id, "prompt", "prompt");
     await run(canvasId, chat.id, "hi");
     const prompt = capture.last as { system: string; messages: { content: string }[] };
-    expect(prompt.system).toContain("SOUL-1");
-    expect(prompt.system).toContain("EXTRA-2");
+    expect(prompt.system).toBe("SOUL-1");
     expect(prompt.messages[0]!.content).toBe("hi");
+  });
+
+  it("critique #3 regression: dual entry (channel + chat → role) does not deadlock", async () => {
+    const { canvasId } = await setup();
+    rt.registry.register(fakeLlm(["dual-ok"]));
+    const ch = rt.store.createNode(canvasId, "channel", {
+      name: "T",
+      kind: "webhook",
+      config: { secret: "s3cret" },
+      active: true,
+    });
+    const chat = rt.store.createNode(canvasId, "chat", { name: "C" });
+    const role = rt.store.createNode(canvasId, "role", {
+      name: "R",
+      soulPrompt: "S",
+      mode: "chat",
+    });
+    const llm = rt.store.createNode(canvasId, "test-llm", {});
+    rt.store.createEdge(canvasId, ch.id, role.id, "message", "message");
+    rt.store.createEdge(canvasId, chat.id, role.id, "message", "message");
+    rt.store.createEdge(canvasId, role.id, llm.id, "prompt", "prompt");
+    rt.store.createEdge(canvasId, llm.id, chat.id, "reply", "reply");
+    // run starts at the channel (webhook-style); chat has no seed and no
+    // delivered message — the required port is satisfied by the channel's
+    // edge alone, so role must still run.
+    const res = await run(canvasId, ch.id, "via-webhook");
+    expect(res.reply).toBe("dual-ok");
+  });
+
+  it("critique #13 regression: a failed node is finished — optional consumers still run", async () => {
+    const { canvasId } = await setup();
+    rt.registry.register(fakeLlm(["done"]));
+    rt.registry.register({
+      type: "test-broken-src",
+      label: "B",
+      category: "io",
+      summary: "x",
+      dataSchema: { type: "object", properties: {}, required: [] },
+      ports: {
+        inputs: [],
+        outputs: [{ name: "tools", type: "TOOLS", required: false }],
+      },
+      async execute() {
+        throw new Error("src blew up");
+      },
+    } as NodeModule);
+    let consumerRan = false;
+    rt.registry.register({
+      type: "test-opt-consumer",
+      label: "O",
+      category: "agent",
+      summary: "x",
+      dataSchema: { type: "object", properties: {}, required: [] },
+      ports: {
+        inputs: [
+          { name: "message", type: "TXT", required: true },
+          { name: "tools", type: "TOOLS", required: false },
+        ],
+        outputs: [{ name: "reply", type: "TXT", required: false }],
+      },
+      async execute() {
+        consumerRan = true;
+        return { reply: "consumer-ok" };
+      },
+    } as NodeModule);
+    const chat = rt.store.createNode(canvasId, "chat", { name: "C" });
+    const broken = rt.store.createNode(canvasId, "test-broken-src", {});
+    const consumer = rt.store.createNode(canvasId, "test-opt-consumer", {});
+    rt.store.createEdge(canvasId, chat.id, consumer.id, "message", "message");
+    rt.store.createEdge(canvasId, broken.id, consumer.id, "tools", "tools");
+    const res = await run(canvasId, chat.id, "hi");
+    expect(consumerRan).toBe(true);
+    expect(res.warnings?.join(" ")).toContain("src blew up");
   });
 
   it("chat-history: second run in the same session sees prior turns", async () => {

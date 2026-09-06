@@ -32,12 +32,10 @@ export function makeProviderLlmNode(): NodeModule {
       type: "object",
       properties: {
         name: { type: "string" },
-        format: { type: "string", enum: ["CHAT", "GENERATION"], default: "CHAT" },
         provider: { type: "string", enum: ["ollama", "openai"], default: "ollama" },
         baseUrl: { type: "string", description: "e.g. http://127.0.0.1:11434/v1 (ollama)" },
         apiKey: { type: "string" },
         model: { type: "string" },
-        think: { type: "string", enum: ["off", "low", "mid", "hi"], default: "off" },
         temperature: { type: "number" },
         maxTokens: { type: "number", description: ">= 8192 for tool-calling graphs." },
       },

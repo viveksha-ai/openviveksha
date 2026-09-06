@@ -53,6 +53,7 @@ export class Store {
       CREATE TABLE IF NOT EXISTS chat_history (
         id INTEGER PRIMARY KEY AUTOINCREMENT,
         canvas_id TEXT NOT NULL,
+        node_id TEXT NOT NULL,
         session_id TEXT NOT NULL,
         role TEXT NOT NULL CHECK (role IN ('user', 'assistant')),
         content TEXT NOT NULL,
@@ -60,7 +61,7 @@ export class Store {
       );
       CREATE INDEX IF NOT EXISTS idx_nodes_canvas ON canvas_nodes(canvas_id);
       CREATE INDEX IF NOT EXISTS idx_edges_canvas ON canvas_edges(canvas_id);
-      CREATE INDEX IF NOT EXISTS idx_history_session ON chat_history(canvas_id, session_id);
+      CREATE INDEX IF NOT EXISTS idx_history_session ON chat_history(canvas_id, node_id, session_id);
     `);
   }
 
@@ -139,8 +140,9 @@ export class Store {
   }
 
   listNodes(canvasId: string): CanvasNode[] {
+    // rowid = insertion order — deterministic creation order (critique #12)
     return (this.db
-      .prepare("SELECT id FROM canvas_nodes WHERE canvas_id = ? ORDER BY created_at, id")
+      .prepare("SELECT id FROM canvas_nodes WHERE canvas_id = ? ORDER BY rowid")
       .all(canvasId) as unknown as { id: string }[]).map((r) => this.getNode(r.id)!);
   }
 
@@ -204,8 +206,9 @@ export class Store {
   }
 
   listEdges(canvasId: string): CanvasEdge[] {
+    // rowid = insertion order — fan-in collects in creation order (critique #12)
     return (this.db
-      .prepare("SELECT id FROM canvas_edges WHERE canvas_id = ? ORDER BY created_at, id")
+      .prepare("SELECT id FROM canvas_edges WHERE canvas_id = ? ORDER BY rowid")
       .all(canvasId) as unknown as { id: string }[]).map((r) => this.getEdge(r.id)!);
   }
 
@@ -217,23 +220,29 @@ export class Store {
 
   appendTurn(
     canvasId: string,
+    nodeId: string,
     sessionId: string,
     role: "user" | "assistant",
     content: string,
   ): void {
     this.db
       .prepare(
-        "INSERT INTO chat_history (canvas_id, session_id, role, content, created_at) VALUES (?, ?, ?, ?, ?)",
+        "INSERT INTO chat_history (canvas_id, node_id, session_id, role, content, created_at) VALUES (?, ?, ?, ?, ?, ?)",
       )
-      .run(canvasId, sessionId, role, content, new Date().toISOString());
+      .run(canvasId, nodeId, sessionId, role, content, new Date().toISOString());
   }
 
-  getHistory(canvasId: string, sessionId: string, depth: number): { role: string; content: string }[] {
+  getHistory(
+    canvasId: string,
+    nodeId: string,
+    sessionId: string,
+    depth: number,
+  ): { role: string; content: string }[] {
     const rows = this.db
       .prepare(
-        "SELECT role, content FROM chat_history WHERE canvas_id = ? AND session_id = ? ORDER BY id DESC LIMIT ?",
+        "SELECT role, content FROM chat_history WHERE canvas_id = ? AND node_id = ? AND session_id = ? ORDER BY id DESC LIMIT ?",
       )
-      .all(canvasId, sessionId, depth > 0 ? depth * 2 : -1) as unknown as {
+      .all(canvasId, nodeId, sessionId, depth > 0 ? depth * 2 : -1) as unknown as {
       role: string;
       content: string;
     }[];

@@ -1,6 +1,7 @@
 /**
  * `role` node — composes the system prompt (SOUL) for this agent. Identity
- * comes from soulPrompt alone: no harmonics, no presets (spec v0.1).
+ * comes from soulPrompt alone: no harmonics, no presets, no modes (spec v0.1,
+ * critique #16).
  */
 
 import type { NodeModule, PortValues } from "../types.js";
@@ -22,13 +23,11 @@ export function makeRoleNode(): NodeModule {
       properties: {
         name: { type: "string" },
         soulPrompt: { type: "string", description: "Agent identity / instructions (SOUL)." },
-        mode: { type: "string", enum: ["chat", "generate"], default: "chat" },
-        systemPrompt: { type: "string", description: "Optional extra system instructions." },
         temperature: { type: "number", minimum: 0, maximum: 2 },
       },
-      required: ["name", "soulPrompt", "mode"],
+      required: ["name", "soulPrompt"],
     },
-    secretFields: ["soulPrompt", "systemPrompt"],
+    secretFields: ["soulPrompt"],
     ports: {
       inputs: [
         { name: "message", type: "TXT", required: true },
@@ -48,11 +47,9 @@ export function makeRoleNode(): NodeModule {
       if (typeof message !== "string" || message.length === 0) {
         throw new Error('role: input "message" (TXT) is required');
       }
-      const system = [data.soulPrompt, data.systemPrompt]
-        .filter((v): v is string => typeof v === "string" && v.length > 0)
-        .join("\n\n");
+      const soul = String(data.soulPrompt ?? "");
       const prompt: PromptShape = {
-        system,
+        system: soul,
         messages: [{ role: "user", content: message }],
       };
       return { prompt } satisfies PortValues;

@@ -1,10 +1,10 @@
 {
   "spec": "openviveksha/nodes",
-  "version": "0.1.0",
-  "description": "OpenViveksha node type registry. Each node type defines config fields (JSON Schema), ports, and execution semantics. Port types: TXT, PROMPT, TOOLS, ANY. EMBED, AUDIO, HARMONICS, SECURITY, FILES are reserved for future versions.",
+  "version": "0.1.2",
+  "description": "OpenViveksha node type registry. Each node type defines config fields (JSON Schema), ports, and execution semantics. Port types: TXT, PROMPT, TOOLS, ANY. Fields marked \"secret\": true are write-only (reads omit them; values may reference ${ENV_NAME}, resolved at run start). EMBED, AUDIO, HARMONICS, SECURITY, FILES are reserved for future versions.",
   "portTypes": {
     "TXT": "Plain text (string).",
-    "PROMPT": "A composed prompt object: { system, messages, tools? }. Produced by role/tools, consumed by llm/tools.",
+    "PROMPT": "Normative prompt object: { system: string, messages: [{ role: \"user\" | \"assistant\" | \"tool\", content: string, toolCalls?, toolCallId? }], tools?: [{ name, description, inputSchema }] }. Produced by role/tools, consumed by tools/llm; provider-llm maps it 1:1 to /chat/completions.",
     "TOOLS": "Tool definitions from an MCP server (array of { name, description, inputSchema }).",
     "ANY": "Wildcard; value type unconstrained."
   },
@@ -13,24 +13,25 @@
       "type": "channel",
       "label": "Input Channel",
       "category": "io",
-      "summary": "External trigger: webhook (HTTP POST with secret) or local webchat. Emits { message } on trigger.",
+      "summary": "External trigger via webhook (HTTP POST with secret). Emits { message } on trigger.",
       "dataSchema": {
         "type": "object",
         "properties": {
           "name": { "type": "string" },
-          "kind": { "type": "string", "enum": ["webhook", "webchat"] },
+          "kind": { "type": "string", "enum": ["webhook"] },
           "config": {
             "type": "object",
             "properties": {
-              "secret": { "type": "string", "description": "Shared secret; required header X-Ingress-Secret on webhook POST." }
+              "secret": { "type": "string", "secret": true, "description": "Required header X-Ingress-Secret on webhook POST. Compared constant-time. May be ${ENV_NAME}." }
             },
             "required": ["secret"]
           },
-          "webhookUrl": { "type": "string", "readOnly": true, "description": "Assigned by runtime when active." },
+          "webhookUrl": { "type": "string", "readOnly": true, "description": "Assigned by runtime when active. The HTTP server binds 127.0.0.1 unless explicitly told otherwise." },
           "active": { "type": "boolean", "default": false }
         },
         "required": ["name", "kind", "config"]
       },
+      "secretFields": ["config"],
       "ports": {
         "inputs": [
           { "name": "reply", "type": "TXT", "required": false }
@@ -40,7 +41,7 @@
         ]
       },
       "execute": {
-        "outputs": "When triggered: { message }. When a value arrives on `reply`, the channel may forward/deliver it (implementation-defined in v0.1: stored and visible via API)."
+        "outputs": "When triggered: { message } (seed, laws §5). When a value arrives on `reply`, the channel may forward/deliver it (v0.1: the run result is the delivery)."
       }
     },
     {
@@ -52,13 +53,12 @@
         "type": "object",
         "properties": {
           "name": { "type": "string" },
-          "soulPrompt": { "type": "string", "encrypted": true, "description": "Agent identity / instructions (SOUL)." },
-          "mode": { "type": "string", "enum": ["chat", "generate"], "default": "chat", "description": "chat: conversational; generate: single-shot content generation." },
-          "systemPrompt": { "type": "string", "encrypted": true, "description": "Optional extra system instructions appended to soulPrompt." },
+          "soulPrompt": { "type": "string", "secret": true, "description": "Agent identity / instructions (SOUL)." },
           "temperature": { "type": "number", "minimum": 0, "maximum": 2 }
         },
-        "required": ["name", "soulPrompt", "mode"]
+        "required": ["name", "soulPrompt"]
       },
+      "secretFields": ["soulPrompt"],
       "ports": {
         "inputs": [
           { "name": "message", "type": "TXT", "required": true },
@@ -70,7 +70,7 @@
         ]
       },
       "execute": {
-        "outputs": "{ prompt: { system, messages } }. On the `reply` input: passes the reply through (loop back-edge delivery)."
+        "outputs": "{ prompt: { system: soulPrompt, messages: [{ role: \"user\", content: message }] } }. On the `reply` input: passes the reply through (loop back-edge delivery)."
       }
     },
     {
@@ -82,17 +82,16 @@
         "type": "object",
         "properties": {
           "name": { "type": "string" },
-          "format": { "type": "string", "enum": ["CHAT", "GENERATION"], "default": "CHAT" },
           "provider": { "type": "string", "enum": ["ollama", "openai"], "default": "ollama" },
           "baseUrl": { "type": "string", "description": "e.g. http://127.0.0.1:11434/v1 (ollama) or https://api.openai.com/v1" },
-          "apiKey": { "type": "string", "encrypted": true },
+          "apiKey": { "type": "string", "secret": true },
           "model": { "type": "string" },
-          "think": { "type": "string", "enum": ["off", "low", "mid", "hi"], "default": "off" },
           "temperature": { "type": "number" },
           "maxTokens": { "type": "number", "description": "Guideline: >= 8192 when the graph uses tool calls — smaller values truncate JSON tool arguments." }
         },
         "required": ["name", "provider", "baseUrl", "model"]
       },
+      "secretFields": ["apiKey"],
       "ports": {
         "inputs": [
           { "name": "prompt", "type": "PROMPT", "required": true }
@@ -102,7 +101,7 @@
         ]
       },
       "execute": {
-        "outputs": "{ reply } — model text; when the prompt carries tools and the model returns tool_calls, tools nodes consume them.",
+        "outputs": "{ reply } — final text, or a { tool_calls: [...] } envelope when the model requests tools (consumed by the tools node).",
         "trace": "Reports tokensIn/tokensOut via trace context."
       }
     },
@@ -126,12 +125,12 @@
           { "name": "reply", "type": "TXT", "required": false, "description": "LLM reply passed through the loop (back-edge)." }
         ],
         "outputs": [
-          { "name": "prompt", "type": "PROMPT", "description": "Prompt augmented with tool schemas." },
-          { "name": "reply", "type": "TXT", "description": "Final reply after tool loop." }
+          { "name": "prompt", "type": "PROMPT", "required": false, "description": "Prompt augmented with tool schemas (and later tool results)." },
+          { "name": "reply", "type": "TXT", "required": false, "description": "Final reply after tool loop." }
         ]
       },
       "execute": {
-        "outputs": "Without tools input: passthrough prompt, reply passthrough. With tools: executes the tool loop (may invoke MCP tools), final { reply }."
+        "outputs": "Without tools input: passthrough prompt, reply passthrough. With tools: executes the tool loop (may invoke MCP tools), final { reply }. Termination: a reply without tool_calls ends the loop."
       }
     },
     {
@@ -144,13 +143,14 @@
         "properties": {
           "name": { "type": "string" },
           "transport": { "type": "string", "enum": ["stdio", "http"], "default": "stdio" },
-          "command": { "type": "string", "description": "stdio: executable command line." },
+          "command": { "type": "string", "description": "stdio: executable command line. WARNING: arbitrary code execution — a canvas is code." },
           "url": { "type": "string", "description": "http: server URL (http transport)." },
-          "authToken": { "type": "string", "encrypted": true, "description": "Optional bearer token sent as Authorization header (http)." },
+          "authToken": { "type": "string", "secret": true, "description": "Optional bearer token sent as Authorization header (http). May be ${ENV_NAME}." },
           "active": { "type": "boolean", "default": false }
         },
         "required": ["name", "transport"]
       },
+      "secretFields": ["authToken"],
       "ports": {
         "inputs": [],
         "outputs": [
@@ -158,20 +158,23 @@
         ]
       },
       "execute": {
-        "outputs": "{ tools: [ { name, description, inputSchema } ] } from the connected MCP server; empty when inactive/unreachable (never blocks the graph — see Laws §5)."
+        "outputs": "{ tools: [ { name, description, inputSchema } ] } from the connected MCP server; { tools: [] } when inactive/unreachable — never blocks the graph (laws §8)."
       }
     },
     {
       "type": "chat-history",
       "label": "Conversation History",
       "category": "agent",
-      "summary": "Memory passthrough: injects prior conversation turns into the prompt and records new turns. Gives an agent memory across runs (per session).",
+      "summary": "Memory passthrough: injects prior conversation turns into the prompt and records new turns. Storage key: (canvasId, nodeId, sessionId) — two history nodes keep separate memories.",
       "dataSchema": {
         "type": "object",
         "properties": {
           "name": { "type": "string" },
-          "depth": { "type": "number", "default": 0, "description": "How many recent turns to inject; 0 = all." },
-          "format": { "type": "string", "enum": ["full", "compressed", "summary"], "default": "full" }
+          "depth": {
+            "type": "number",
+            "default": 20,
+            "description": "How many recent turns to inject. 0 = unlimited."
+          }
         },
         "required": ["name"]
       },
@@ -186,14 +189,14 @@
         ]
       },
       "execute": {
-        "outputs": "On `prompt`: appends stored conversation turns, returns augmented prompt. On `reply`: records the assistant turn, passes the reply through."
+        "outputs": "On `prompt`: appends stored turns before the current user turn and records the user turn. On `reply`: records the assistant turn BEFORE emitting (so a direct llm.reply → chat.reply wire can never outrun the record), passes the reply through. Turn shape: { role: \"user\" | \"assistant\", content: string }; storage: SQLite, survives restarts."
       }
     },
     {
       "type": "chat",
       "label": "Chat / Output",
       "category": "io",
-      "summary": "Conversation entry/output node. Typically the run start (seeded with { message }) and the sink for the final reply.",
+      "summary": "Conversation entry/output node. Typically the run start (seeded with { message }) and the sink whose `reply` input terminates the run (laws §10).",
       "dataSchema": {
         "type": "object",
         "properties": {
@@ -210,7 +213,7 @@
         ]
       },
       "execute": {
-        "outputs": "{ message } — as start node it is seeded by the executor; otherwise forwards the incoming reply."
+        "outputs": "As start node: seeded by the executor, never re-executes (laws §5/§10). Otherwise: forwards the incoming reply as its message output."
       }
     }
   ]

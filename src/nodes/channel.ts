@@ -19,7 +19,7 @@ export function makeChannelNode(): NodeModule {
       type: "object",
       properties: {
         name: { type: "string" },
-        kind: { type: "string", enum: ["webhook", "webchat"] },
+        kind: { type: "string", enum: ["webhook"] },
         config: {
           type: "object",
           properties: {

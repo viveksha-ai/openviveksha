@@ -81,21 +81,15 @@ export interface ModuleLogger {
   error(msg: string): void;
 }
 
-export interface Cache {
-  get(nodeId: string, inputSignature: string): PortValues | null;
-  set(nodeId: string, inputSignature: string, outputs: PortValues): void;
-  invalidate(nodeId: string): void;
+export interface HttpApi {
+  get(path: string): Promise<unknown>;
+  post(path: string, body: unknown): Promise<unknown>;
 }
 
 export interface CanvasApi {
   getNode(nodeId: string): CanvasNode | null;
   getNeighbors(nodeId: string): { id: string; type: string; edgeId: string; port?: string }[];
   getEdges(canvasId: string): CanvasEdge[];
-}
-
-export interface HttpApi {
-  get(path: string): Promise<unknown>;
-  post(path: string, body: unknown): Promise<unknown>;
 }
 
 export interface TraceContext {
@@ -115,7 +109,6 @@ export interface ExecutionContext {
   inputs: PortValues;
   data: Record<string, unknown>;
   logger: ModuleLogger;
-  cache: Cache;
   canvasApi: CanvasApi;
   httpApi: HttpApi;
   trace?: TraceContext;

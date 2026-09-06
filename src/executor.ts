@@ -48,13 +48,39 @@ function sanitizeValue(value: unknown): unknown {
 class TraceCollector {
   private current: TraceObservation | null = null;
 
-  constructor(private trace: Trace) {}
+  constructor(private trace: Trace, private getSecrets: (nodeType: string) => string[]) {}
+
+  /**
+   * laws §13 (critique #7): secret fields and PROMPT payloads never enter
+   * traces — secrets become [redacted], PROMPT objects become counts/lengths.
+   */
+  private redact(nodeType: string, values: PortValues): PortValues {
+    const secrets = this.getSecrets(nodeType);
+    const out: PortValues = {};
+    for (const [k, v] of Object.entries(values)) {
+      if (secrets.includes(k)) {
+        out[k] = "[redacted]";
+        continue;
+      }
+      if (k === "prompt" && v && typeof v === "object") {
+        const p = v as { system?: unknown; messages?: unknown[]; tools?: unknown[] };
+        out[k] = {
+          system: typeof p.system === "string" ? `string(${p.system.length})` : undefined,
+          messages: `count(${Array.isArray(p.messages) ? p.messages.length : 0})`,
+          tools: Array.isArray(p.tools) ? `count(${p.tools.length})` : undefined,
+        };
+        continue;
+      }
+      out[k] = sanitizeValue(v);
+    }
+    return out;
+  }
 
   begin(nodeId: string, nodeType: string, input: PortValues): void {
     this.current = {
       nodeId,
       nodeType,
-      input: sanitizeValue(input) as PortValues,
+      input: this.redact(nodeType, input),
       output: {},
       durationMs: 0,
       timestamp: new Date().toISOString(),
@@ -64,7 +90,7 @@ class TraceCollector {
 
   end(output: PortValues, durationMs: number, error?: string): void {
     if (!this.current) return;
-    this.current.output = sanitizeValue(output) as PortValues;
+    this.current.output = this.redact(this.current.nodeType, output);
     this.current.durationMs = Math.round(durationMs * 100) / 100;
     if (error) this.current.error = error;
     this.current = null;
@@ -103,9 +129,7 @@ export interface RunRequest {
 }
 
 export class GraphExecutor {
-  private cache = new Map<string, PortValues>();
   private traces = new Map<string, Trace>();
-  private invalidateHooks: ((nodeId: string) => void)[] = [];
 
   constructor(
     private registry: NodeRegistry,
@@ -114,17 +138,6 @@ export class GraphExecutor {
     private listEdges: (canvasId: string) => CanvasEdge[],
     private toolsApi?: ToolsApi,
   ) {}
-
-  onInvalidate(hook: (nodeId: string) => void): void {
-    this.invalidateHooks.push(hook);
-  }
-
-  invalidate(nodeId: string): void {
-    for (const key of [...this.cache.keys()]) {
-      if (key.startsWith(nodeId + ":")) this.cache.delete(key);
-    }
-    for (const hook of this.invalidateHooks) hook(nodeId);
-  }
 
   /** laws §6: reachable from the start node in BOTH directions. */
   reachableNodes(startNodeId: string, nodes: CanvasNode[], edges: CanvasEdge[]): Set<string> {
@@ -184,10 +197,10 @@ export class GraphExecutor {
     return inputs;
   }
 
-  /** laws §7–§8: readiness. Only incoming edges make a node ready.
-   * Required: the source must deliver a VALUE on this wire. Optional: wait for
-   * a pending source (§8), unless the port is `reply`; a finished source with
-   * no value means the input is simply absent (§8, run anyway). */
+  /** laws §7–§8 (port-level, critique #3): a required input PORT is satisfied
+   * when AT LEAST ONE incoming edge targeting it delivers a value. Optional:
+   * wait for a pending source (§8), unless the port is `reply`; a finished
+   * source with no value means the input is simply absent (§8, run anyway). */
   private isReady(
     nodeId: string,
     mod: NodeModule,
@@ -195,22 +208,28 @@ export class GraphExecutor {
     outputs: Map<string, PortValues>,
     remaining: Set<string>,
   ): boolean {
+    const byPort = new Map<string, { required: boolean; satisfied: boolean; pending: boolean; isReply: boolean }>();
     for (const edge of incomingEdges) {
-      const targetPort = mod.ports.inputs.find((p) => p.name === (edge.targetPort ?? ""));
-      const isRequired = targetPort?.required ?? true;
       const neighborOut = outputs.get(edge.sourceId);
       const sourcePort = edge.sourcePort ?? (neighborOut ? Object.keys(neighborOut)[0] : undefined);
+      const targetPort = edge.targetPort ?? sourcePort;
+      if (!targetPort) continue;
+      const def = mod.ports.inputs.find((p) => p.name === targetPort);
+      const state = byPort.get(targetPort) ?? {
+        required: def?.required ?? true,
+        satisfied: false,
+        pending: false,
+        isReply: targetPort === "reply",
+      };
       const value = neighborOut && sourcePort ? neighborOut[sourcePort] : undefined;
-      if (value !== undefined) continue; // this wire delivers — satisfied
-      if (isRequired) return false;
-      if (!outputs.has(edge.sourceId)) {
-        // Source still pending: wait, so a node never runs before its tools
-        // source executes. Exception: `reply` back-edges close cycles; waiting
-        // on them would deadlock (e.g. chat → role → … → reply → chat).
-        if (remaining.has(edge.sourceId) && targetPort?.name !== "reply") {
-          return false;
-        }
-      }
+      if (value !== undefined) state.satisfied = true;
+      if (!outputs.has(edge.sourceId)) state.pending = true;
+      byPort.set(targetPort, state);
+    }
+    for (const [, state] of byPort) {
+      if (state.satisfied) continue;
+      if (state.required && state.pending && !state.isReply) return false; // §8 wait
+      if (state.required && !state.pending) return false; // required, never satisfied
     }
     return true;
   }
@@ -221,7 +240,8 @@ export class GraphExecutor {
 
   private async executeGraph(req: RunRequest): Promise<RunResult> {
     const { canvasId, startNodeId, message, sessionId } = req;
-    this.cache.clear(); // laws §14: a run starts from a clean execution cache
+    // laws v0.1.2: no cross-run cache (§14 cut per critique #8); stability is
+    // tracked per run via executedSig.
 
     const graphStart = performance.now();
     const trace: Trace = {
@@ -235,7 +255,7 @@ export class GraphExecutor {
       observations: [],
       createdAt: new Date().toISOString(),
     };
-    const collector = new TraceCollector(trace);
+    const collector = new TraceCollector(trace, (t) => this.registry.getByType(t)?.secretFields ?? []);
 
     const allNodes = this.listNodes(canvasId);
     const allEdges = this.listEdges(canvasId);
@@ -248,6 +268,11 @@ export class GraphExecutor {
 
     // §5 seed: the start node outputs { message } without executing.
     outputs.set(startNodeId, { message });
+
+    const startReplyEdges = edges.filter(
+      (e) => e.targetId === startNodeId && (e.targetPort ?? e.sourcePort) === "reply",
+    );
+    let startReply: unknown = null;
 
     // True fixed point (§9): nodes stay in the worklist and re-execute when
     // their inputs change. The tool loop emerges from this: tools re-prompts →
@@ -283,14 +308,6 @@ export class GraphExecutor {
         const sig = this.inputSignature(inputs);
         if (executedSig.get(nodeId) === sig && outputs.has(nodeId)) continue; // stable
 
-        const cacheKey = nodeId + ":" + sig;
-        if (this.cache.has(cacheKey)) {
-          outputs.set(nodeId, this.cache.get(cacheKey)!);
-          executedSig.set(nodeId, sig);
-          progress = true;
-          continue;
-        }
-
         const ctx = {
           nodeId,
           canvasId,
@@ -298,11 +315,6 @@ export class GraphExecutor {
           inputs,
           data: node.data,
           logger: console,
-          cache: {
-            get: (nid: string, s: string) => this.cache.get(nid + ":" + s) ?? null,
-            set: (nid: string, s: string, v: PortValues) => this.cache.set(nid + ":" + s, v),
-            invalidate: (nid: string) => this.invalidate(nid),
-          },
           canvasApi: this.canvasApi,
           httpApi: {
             get: async (p: string) => (await fetch(p)).json(),
@@ -323,30 +335,52 @@ export class GraphExecutor {
         const t0 = performance.now();
         try {
           const result = await mod.execute(ctx);
-          this.cache.set(cacheKey, result);
           outputs.set(nodeId, result);
           executedSig.set(nodeId, sig);
           collector.end(result, performance.now() - t0);
         } catch (err) {
           const msg = err instanceof Error ? err.message : String(err);
           errors.push(`${node.type} (${nodeId.slice(0, 8)}): ${msg}`);
-          executedSig.set(nodeId, sig); // a failed node is stable — no retry spin
+          // A failed node is finished with no output (critique #13): consumers
+          // of its optional ports run without the value; required ports end
+          // the run with the collected error.
+          outputs.set(nodeId, {});
+          executedSig.set(nodeId, sig);
           collector.end({}, performance.now() - t0, msg);
         }
         progress = true;
       }
+
+      // §10/termination (critique #1/#2): the run ends when a reply value is
+      // delivered to the start node's `reply` input. The start node never
+      // re-executes and never republishes a received reply.
+      for (const e of startReplyEdges) {
+        const out = outputs.get(e.sourceId);
+        const v = out ? out[e.sourcePort ?? "reply"] : undefined;
+        if (v != null) {
+          startReply = v;
+          break;
+        }
+      }
+      if (startReply != null) break;
     }
     if (iterations >= maxIterations) {
       errors.push("executor: iteration cap reached (§9) — the graph did not stabilize");
     }
 
-    // §10: first resolved reply wins; failures ride along as warnings.
+    // §10 (critique #2): the reply delivered to the start node's reply input
+    // is the run result. Fallback: first non-null reply output.
     let result: PortValues | null = null;
-    for (const [, out] of outputs) {
-      if (out?.reply != null) {
-        if (errors.length > 0) out.warnings = errors;
-        result = out;
-        break;
+    if (startReply != null) {
+      result = { reply: startReply };
+      if (errors.length > 0) result.warnings = errors;
+    } else {
+      for (const [, out] of outputs) {
+        if (out?.reply != null) {
+          if (errors.length > 0) out.warnings = errors;
+          result = out;
+          break;
+        }
       }
     }
     if (result === null) {

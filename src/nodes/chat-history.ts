@@ -26,8 +26,11 @@ export function makeChatHistoryNode(store: Store): NodeModule {
       type: "object",
       properties: {
         name: { type: "string" },
-        depth: { type: "number", default: 0, description: "How many recent turns to inject; 0 = all." },
-        format: { type: "string", enum: ["full", "compressed", "summary"], default: "full" },
+        depth: {
+          type: "number",
+          default: 20,
+          description: "How many recent turns to inject. 0 = unlimited.",
+        },
       },
       required: ["name"],
     },
@@ -42,14 +45,14 @@ export function makeChatHistoryNode(store: Store): NodeModule {
       ],
     },
     async execute(ctx) {
-      const { canvasId, sessionId, inputs, data } = ctx;
-      const depth = typeof data.depth === "number" && data.depth > 0 ? data.depth : 0;
+      const { nodeId, canvasId, sessionId, inputs, data } = ctx;
+      const depth = typeof data.depth === "number" && data.depth >= 0 ? data.depth : 20;
 
       const reply = inputs["reply"];
       if (reply != null) {
         // Reply first: in later waves both prompt (stale) and reply are present;
         // recording the turn must win over re-injecting the prompt.
-        store.appendTurn(canvasId, sessionId, "assistant", String(reply));
+        store.appendTurn(canvasId, nodeId, sessionId, "assistant", String(reply));
         return { reply };
       }
 
@@ -57,12 +60,12 @@ export function makeChatHistoryNode(store: Store): NodeModule {
       if (prompt && Array.isArray(prompt.messages)) {
         // Prior turns first (current message is already in prompt.messages);
         // then record this run's user turn — order stays user→assistant.
-        const prior = store.getHistory(canvasId, sessionId, depth).map((t) => ({
+        const prior = store.getHistory(canvasId, nodeId, sessionId, depth).map((t) => ({
           role: t.role === "assistant" ? "assistant" : "user",
           content: t.content,
         }));
         const lastUser = [...prompt.messages].reverse().find((m) => m.role === "user");
-        if (lastUser) store.appendTurn(canvasId, sessionId, "user", lastUser.content);
+        if (lastUser) store.appendTurn(canvasId, nodeId, sessionId, "user", lastUser.content);
         return { prompt: { ...prompt, messages: [...prior, ...prompt.messages] } };
       }
 

@@ -28,6 +28,11 @@ Out of scope for v0.1: multi-tenant isolation, public deployments, node
 egress filtering. A hardened edition (net-guard for node HTTP egress) is a
 commercial-edition concern and intentionally not part of this runtime.
 
+**Secrets at rest:** canvas files store secrets as `${ENV_NAME}` references,
+but resolved values live in the local SQLite database after the first run
+(plaintext on your disk — within the local trust boundary above). Reads over
+the API/MCP never return them, and traces redact them.
+
 ## What we especially want to hear about
 
 - Ingress secret bypass or timing leaks

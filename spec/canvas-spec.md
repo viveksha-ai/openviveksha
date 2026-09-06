@@ -91,7 +91,7 @@ nodes:
     data:
       name: Trigger
       kind: webhook
-      config: { secret: "${NEWS_WEBHOOK_SECRET}" }
+      config: { secret: "${EXAMPLE_WEBHOOK_SECRET}" }
       active: true
   - id: chat1
     type: chat
@@ -109,7 +109,7 @@ nodes:
     data:
       name: Local Tools
       transport: stdio
-      command: "npx -y @openviveksha/example-mcp-tools"
+      command: "node ./tools-server.mjs"
       active: true
   - id: llm1
     type: provider-llm

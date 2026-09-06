@@ -51,7 +51,9 @@ One node type's full contract. Unknown `type` → error listing available types.
 → { "ok": true, "node": { …effective data… } }
 ```
 Full replacement of `data` (validated, defaults applied). The response echoes
-the effective data so the client can verify what stuck.
+the effective data so the client can verify what stuck. **Secret fields are
+write-only**: reads omit them, so a read-modify-write that drops a secret
+field deletes its value — always re-send secrets you intend to keep.
 
 ### delete_node
 ```json
@@ -82,17 +84,19 @@ Removes the node and its edges.
 → { "ok": true, "valid": true, "errors": [], "warnings": [
     "provider-llm node 'llm1': maxTokens < 8192 with a tools wire attached —
      tool arguments may be truncated",
-    "channel node 'ch1' is active but not the start of any run path" ] }
+    "mcp node 'mcp1' is active: false — it will not trigger/emit" ] }
 ```
 The static checker an AI client should call before `run_canvas`:
 - dangling edge endpoints; unknown port names; port-type mismatches
 - required input ports with no wired edge at all
-- `data` fails `dataSchema` for any node
 - cycle risk report (cycles are legal — laws §8/§9 handle them — but are
   reported for review)
 - heuristics as warnings (never errors): `maxTokens < 8192` with a tools
   wire; `mcp`/`channel` nodes with `active: false`; `chat-history` without
   any `reply` wire back to it.
+
+(Note: `data` values are validated against the node type's `dataSchema` at
+create/update time — `validate_canvas` checks the graph structure, not data.)
 
 ### run_canvas
 ```json

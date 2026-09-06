@@ -22,7 +22,11 @@ trigger and resolves the final `reply`. Execution semantics are defined in
   When a port is omitted, the runtime uses the neighbor's first output /
   same-named port.
 
-## Example — minimal agent
+## Example — minimal agent (with memory)
+
+The canonical smallest useful agent: `chat` → `role` → `chat-history` →
+`provider-llm`. No harmonics, no presets — identity comes from `soulPrompt`
+alone.
 
 ```yaml
 spec: openviveksha/canvas
@@ -38,6 +42,9 @@ nodes:
       name: Assistant
       mode: chat
       soulPrompt: You are a terse helpful assistant.
+  - id: hist1
+    type: chat-history
+    data: { name: Memory, depth: 0 }
   - id: llm1
     type: provider-llm
     data:
@@ -48,14 +55,18 @@ nodes:
       maxTokens: 8192
 edges:
   - { sourceId: chat1, sourcePort: message, targetId: role1, targetPort: message }
-  - { sourceId: role1, sourcePort: prompt,  targetId: llm1,  targetPort: prompt  }
-  - { sourceId: llm1,  sourcePort: reply,   targetId: chat1, targetPort: reply   }
+  - { sourceId: role1, sourcePort: prompt,  targetId: hist1, targetPort: prompt  }
+  - { sourceId: hist1, sourcePort: prompt,  targetId: llm1,  targetPort: prompt  }
+  - { sourceId: llm1,  sourcePort: reply,   targetId: hist1, targetPort: reply   }
+  - { sourceId: hist1, sourcePort: reply,   targetId: chat1, targetPort: reply   }
 ```
 
-Run: `POST /api/canvas/:id/run { "startNodeId": "chat1", "message": "hi" }`
-→ executor seeds `chat1` with `{ message }`, `role1` composes the prompt,
-`llm1` answers, the reply flows back to `chat1`, and the run returns the first
-resolved `reply`.
+Run: `POST /api/canvas/:id/run { "startNodeId": "chat1", "message": "hi",
+"sessionId": "..." }` → executor seeds `chat1` with `{ message }`, `role1`
+composes the prompt, `hist1` augments it with prior turns, `llm1` answers, the
+reply is recorded by `hist1` and delivered back to `chat1`, and the run
+returns the first resolved `reply`. Same `sessionId` continues the
+conversation.
 
 ## Example — tool-using agent (full MVP graph)
 

@@ -162,6 +162,34 @@
       }
     },
     {
+      "type": "chat-history",
+      "label": "Conversation History",
+      "category": "agent",
+      "summary": "Memory passthrough: injects prior conversation turns into the prompt and records new turns. Gives an agent memory across runs (per session).",
+      "dataSchema": {
+        "type": "object",
+        "properties": {
+          "name": { "type": "string" },
+          "depth": { "type": "number", "default": 0, "description": "How many recent turns to inject; 0 = all." },
+          "format": { "type": "string", "enum": ["full", "compressed", "summary"], "default": "full" }
+        },
+        "required": ["name"]
+      },
+      "ports": {
+        "inputs": [
+          { "name": "prompt", "type": "PROMPT", "required": false },
+          { "name": "reply", "type": "TXT", "required": false }
+        ],
+        "outputs": [
+          { "name": "prompt", "type": "PROMPT", "description": "Prompt augmented with prior turns." },
+          { "name": "reply", "type": "TXT", "description": "Reply passthrough after recording." }
+        ]
+      },
+      "execute": {
+        "outputs": "On `prompt`: appends stored conversation turns, returns augmented prompt. On `reply`: records the assistant turn, passes the reply through."
+      }
+    },
+    {
       "type": "chat",
       "label": "Chat / Output",
       "category": "io",

@@ -200,6 +200,33 @@ describe("HTTP server", () => {
     expect(good.json.ok).toBe(true);
     expect(good.json.reply).toBe("http-ok");
 
+    // MCP over HTTP lives on the same server/port, behind the same Origin guard.
+    const evilMcp = await post(
+      "/mcp",
+      { jsonrpc: "2.0", id: 1, method: "initialize", params: {} },
+      { origin: "https://evil.example" },
+    );
+    expect(evilMcp.status).toBe(403);
+    const mcpInit = await fetch(base + "/mcp", {
+      method: "POST",
+      headers: {
+        "content-type": "application/json",
+        accept: "application/json, text/event-stream",
+      },
+      body: JSON.stringify({
+        jsonrpc: "2.0",
+        id: 1,
+        method: "initialize",
+        params: {
+          protocolVersion: "2025-03-26",
+          capabilities: {},
+          clientInfo: { name: "test-client", version: "0.0.0" },
+        },
+      }),
+    });
+    expect(mcpInit.status).toBe(200);
+    expect(await mcpInit.text()).toContain("openviveksha");
+
     server.close();
     rt2.store.close();
     rmSync(dir2, { recursive: true, force: true });

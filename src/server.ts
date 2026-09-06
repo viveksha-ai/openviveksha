@@ -23,6 +23,7 @@
 import { createServer, IncomingMessage, Server, ServerResponse } from "node:http";
 import type { Runtime } from "./index.js";
 import { CanvasService } from "./services.js";
+import { handleMcpHttp } from "./mcp/server.js";
 
 interface Ctx {
   params: Record<string, string>;
@@ -139,6 +140,12 @@ async function handle(
       if (!/^(127\.0\.0\.1|localhost|\[::1\])(:\d+)?$/.test(host)) {
         return send(res, 403, { ok: false, error: "cross-origin requests are not allowed" });
       }
+    }
+
+    // MCP surface on the same server/port, behind the same Origin guard.
+    if (url.pathname === "/mcp") {
+      await handleMcpHttp(rt, req, res);
+      return;
     }
 
     for (const r of routes) {

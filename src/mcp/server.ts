@@ -11,7 +11,7 @@ import { StreamableHTTPServerTransport } from "@modelcontextprotocol/sdk/server/
 import { z } from "zod";
 import type { Runtime } from "../index.js";
 import { CanvasService } from "../services.js";
-import { createServer, type IncomingMessage, type Server, type ServerResponse } from "node:http";
+import type { IncomingMessage, ServerResponse } from "node:http";
 
 export function createMcpServer(rt: Runtime): McpServer {
   const svc = new CanvasService(rt);
@@ -158,40 +158,29 @@ export function createMcpServer(rt: Runtime): McpServer {
   return server;
 }
 
-/** Serve MCP over streamable HTTP at /mcp (localhost). */
-export function serveMcpHttp(rt: Runtime, port: number, host: string): Server {
-  const server = createServer((req, res) => {
-    void handleMcpHttp(rt, req, res).catch(() => {
-      if (!res.headersSent) res.writeHead(500).end();
-    });
-  });
-  server.listen(port, host);
-  return server;
-}
-
 // Stateless streamable HTTP: one request → one response (v0.1, no sessions).
-async function handleMcpHttp(rt: Runtime, req: IncomingMessage, res: ServerResponse): Promise<void> {
+// Mounted by the main HTTP server (src/server.ts) at /mcp — behind the same
+// Origin guard as /api.
+export async function handleMcpHttp(rt: Runtime, req: IncomingMessage, res: ServerResponse): Promise<void> {
   const url = new URL(req.url ?? "/", "http://127.0.0.1");
   if (url.pathname !== "/mcp") {
     res.writeHead(404).end();
     return;
   }
-  const transport = new StreamableHTTPServerTransport({ sessionIdGenerator: undefined });
+  const transport = new StreamableHTTPServerTransport({
+    sessionIdGenerator: undefined,
+    enableJsonResponse: true,
+  });
   const mcp = createMcpServer(rt);
   await mcp.connect(transport);
-  void transport
-    .handleRequest(req, res)
-    .catch(() => {
-      if (!res.headersSent) res.writeHead(500).end();
-    })
-    .finally(() => {
-      void transport.close();
-      void mcp.close();
-    });
-  req.on("close", () => {
+  try {
+    await transport.handleRequest(req, res);
+  } catch {
+    if (!res.headersSent) res.writeHead(500).end();
+  } finally {
     void transport.close();
     void mcp.close();
-  });
+  }
 }
 
 // stdio entry used by AI clients that spawn the process.

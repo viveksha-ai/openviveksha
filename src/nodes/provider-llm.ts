@@ -34,7 +34,7 @@ export function makeProviderLlmNode(): NodeModule {
         name: { type: "string" },
         provider: { type: "string", enum: ["ollama", "openai"], default: "ollama" },
         baseUrl: { type: "string", description: "e.g. http://127.0.0.1:11434/v1 (ollama)" },
-        apiKey: { type: "string" },
+        apiKey: { type: "string", secret: true },
         model: { type: "string" },
         temperature: { type: "number" },
         maxTokens: { type: "number", description: ">= 8192 for tool-calling graphs." },

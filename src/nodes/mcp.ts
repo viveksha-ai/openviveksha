@@ -20,7 +20,7 @@ export function makeMcpNode(hub: McpHub): NodeModule {
         transport: { type: "string", enum: ["stdio", "http"], default: "stdio" },
         command: { type: "string", description: "stdio: executable command line." },
         url: { type: "string", description: "http: server URL." },
-        authToken: { type: "string", description: "Optional bearer token (http)." },
+        authToken: { type: "string", secret: true, description: "Optional bearer token (http). May be ${ENV_NAME}." },
         active: { type: "boolean", default: false },
       },
       required: ["name", "transport"],

@@ -23,7 +23,7 @@ export function makeChannelNode(): NodeModule {
         config: {
           type: "object",
           properties: {
-            secret: { type: "string", description: "Required header X-Ingress-Secret on webhook POST." },
+            secret: { type: "string", secret: true, description: "Required header X-Ingress-Secret on webhook POST. May be ${ENV_NAME}." },
           },
           required: ["secret"],
         },

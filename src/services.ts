@@ -6,7 +6,7 @@
 import { timingSafeEqual } from "node:crypto";
 import type { Runtime } from "./index.js";
 import { resolveSecrets, stripSecrets, effectiveData } from "./secrets.js";
-import type { CanvasNode } from "./types.js";
+import type { CanvasNode, Trace } from "./types.js";
 import type { NodeTypeInfo } from "./registry.js";
 
 export interface RunOutcome {
@@ -281,7 +281,24 @@ export class CanvasService {
     this.prepareSecrets(canvasId);
     const start = this.resolveStartNodeId(canvasId, startNodeId);
     const res = await this.rt.executor.run({ canvasId, startNodeId: start, message, sessionId });
+    if (this.rt.verbose) {
+      const t = this.rt.executor.getTrace(res.traceId);
+      if (t) this.printRunTrace(t);
+    }
     return { reply: res.reply, warnings: res.warnings ?? [], error: res.error, traceId: res.traceId };
+  }
+
+  private printRunTrace(t: Trace): void {
+    console.error(`▶ run ${t.traceId} canvas ${t.canvasId}`);
+    for (const o of t.observations) {
+      let line = `✓ ${o.nodeType} ${o.durationMs}ms`;
+      if (o.tokensIn !== undefined || o.tokensOut !== undefined) {
+        line += ` tok ${o.tokensIn ?? 0}/${o.tokensOut ?? 0}`;
+      }
+      if (o.error) line += ` ERR ${o.error}`;
+      console.error(line);
+    }
+    console.error(`← reply (${t.reply.length} chars) total ${t.totalDurationMs}ms`);
   }
 
   async testAgent(canvasId: string, messages: string[]) {

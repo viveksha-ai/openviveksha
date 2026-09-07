@@ -25,9 +25,14 @@ export interface Runtime {
   registry: NodeRegistry;
   executor: GraphExecutor;
   mcpHub: McpHub;
+  verbose?: boolean;
 }
 
-export function createRuntime(dbPath: string): Runtime {
+export interface RuntimeOptions {
+  verbose?: boolean;
+}
+
+export function createRuntime(dbPath: string, options: RuntimeOptions = {}): Runtime {
   const store = new Store(dbPath);
   const registry = new NodeRegistry();
   const mcpHub = new McpHub();
@@ -68,5 +73,5 @@ export function createRuntime(dbPath: string): Runtime {
 
   registerBuiltins(registry, store, mcpHub);
 
-  return { store, registry, executor, mcpHub };
+  return { store, registry, executor, mcpHub, verbose: options.verbose };
 }

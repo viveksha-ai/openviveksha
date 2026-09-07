@@ -4,3 +4,7 @@ dist/
 .env
 .env.*
 *.sqlite
+*.sqlite
+*.sqlite-shm
+*.sqlite-wal
+gif-frames/

@@ -21,7 +21,11 @@ const cli = resolve(root, "dist/cli.js");
 const db = resolve(root, "demo.sqlite");
 const noLlm = process.argv.includes("--no-llm");
 
-const transport = new StdioClientTransport({ command: process.execPath, args: [cli, "mcp", "--db", db] });
+const transport = new StdioClientTransport({
+  command: process.execPath,
+  // OVX_VERBOSE=1 → live trace to stderr (does not pollute the stdio protocol).
+  args: [cli, "mcp", "--db", db, ...(process.env.OVX_VERBOSE ? ["--verbose"] : [])],
+});
 const client = new Client({ name: "demo-client", version: "0.1.2" });
 await client.connect(transport);
 

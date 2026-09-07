@@ -22,12 +22,13 @@ const { values, positionals } = parseArgs({
     port: { type: "string", default: "8031" },
     host: { type: "string", default: "127.0.0.1" },
     db: { type: "string", default: "./openviveksha.sqlite" },
+    verbose: { type: "boolean", default: false },
   },
 });
 
 const mode = positionals[0] ?? values.mode ?? "serve";
 const dbPath = resolve(values.db!);
-const rt = createRuntime(dbPath);
+const rt = createRuntime(dbPath, { verbose: values.verbose ?? false });
 
 if (mode === "mcp") {
   await serveMcpStdio(rt);

@@ -23,6 +23,15 @@ OpenCode / Claude Code:         list_nodes → create_node ×6 → create_edge �
 Result:                         a working agent, one SQLite file away.
 ```
 
+<p align="center">
+  <img src="assets/openviveksha-demo.gif" alt="An AI client assembles an agent through MCP, then the runtime executes it: node trace with timings and tokens, replies from a local model" width="760">
+</p>
+
+<p align="center"><sub>Live demo: an MCP client assembles the agent (canvas → 4 nodes → 5 wires →
+validation), then the runtime executes it — the trace shows every node with
+timings and tokens. Model: <code>qwen3.8:27b</code> on a local Ollama box. No SaaS. No cloud.
+Start the runtime with <code>serve --verbose</code> to watch your own runs like this.</sub></p>
+
 We proved it the hard way first: a production news site is maintained by an
 agent that an AI client assembled through this exact MCP workflow — nodes,
 wires, validation, runs — on a live schedule.
@@ -53,7 +62,8 @@ git clone https://github.com/viveksha-ai/openviveksha && cd openviveksha
 npm install && npm run build
 
 # start the runtime (HTTP on 127.0.0.1:8031 + MCP on /mcp)
-node dist/cli.js serve --db ./agent.sqlite
+# add --verbose to watch every run execute: per-node trace with timings and tokens
+node dist/cli.js serve --db ./agent.sqlite --verbose
 ```
 
 ### Let an AI client program it

@@ -27,6 +27,14 @@ We proved it the hard way first: a production news site is maintained by an
 agent that an AI client assembled through this exact MCP workflow — nodes,
 wires, validation, runs — on a live schedule.
 
+> **Why OpenViveksha?** This project has an origin story: a founder who
+deliberately avoided other builders, hit the wall of monoliths and hardcode,
+wrote testable execution laws out of battle scars — and arrived at a paradigm
+where *an intention has no face*.
+
+➡️ Read the full story: [The Path of Viveksha](docs/project-history.md) ·
+🇷🇺 Russian original: [Путь Вивекши](https://news.viveksha.ru/put-vivekshi-paradigma-ii-agentov/)
+
 - **Spec-first** — the canvas is a *language*: `spec/nodes.schema.json`
   (7 node types), `spec/canvas-spec.md` (file format), `spec/laws.md`
   (14 testable execution laws).

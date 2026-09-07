@@ -6,6 +6,9 @@
  */
 
 import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
+import type { ToolCallback } from "@modelcontextprotocol/sdk/server/mcp.js";
+import type { ZodRawShapeCompat, AnySchema } from "@modelcontextprotocol/sdk/server/zod-compat.js";
+import type { ToolAnnotations } from "@modelcontextprotocol/sdk/types.js";
 import { StdioServerTransport } from "@modelcontextprotocol/sdk/server/stdio.js";
 import { StreamableHTTPServerTransport } from "@modelcontextprotocol/sdk/server/streamableHttp.js";
 import { z } from "zod";
@@ -18,13 +21,55 @@ export function createMcpServer(rt: Runtime): McpServer {
   const server = new McpServer({ name: "openviveksha", version: "0.1.2" });
   const json = (v: unknown) => ({ content: [{ type: "text" as const, text: JSON.stringify(v, null, 2) }] });
 
-  server.registerTool(
+  type ToolConfig<InputArgs> = {
+    title?: string;
+    description?: string;
+    inputSchema?: InputArgs;
+    outputSchema?: Record<string, AnySchema> | AnySchema;
+    annotations?: ToolAnnotations;
+    _meta?: Record<string, unknown>;
+  };
+
+  const registerLoggedTool = <
+    OutputArgs extends ZodRawShapeCompat | AnySchema,
+    InputArgs extends undefined | ZodRawShapeCompat | AnySchema = undefined,
+  >(
+    name: string,
+    config: ToolConfig<InputArgs>,
+    handler: ToolCallback<InputArgs>,
+  ) =>
+    server.registerTool(
+      name,
+      config as Parameters<typeof server.registerTool>[1],
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      (async (...rest: Parameters<typeof handler>) => {
+        const args = config.inputSchema !== undefined ? (rest[0] as unknown) : undefined;
+        if (rt.verbose) {
+          const argSummary
+            = args
+              && typeof args === "object"
+              ? Object.entries(args).map(([k, v]) => k + "=" + String(typeof v === "string" ? v.slice(0, 40) : JSON.stringify(v)?.slice(0, 40) ?? "")).join(" ")
+              : "";
+          console.error("→ " + name + (argSummary ? " (" + argSummary + ")" : ""));
+        }
+        try {
+          const res = await (handler as (...a: unknown[]) => Promise<unknown>)(...rest);
+          if (rt.verbose) console.error("← " + name + " ok");
+          return res;
+        } catch (e) {
+          if (rt.verbose) console.error("← " + name + " ERR: " + String((e as Error).message));
+          throw e;
+        }
+      }) as Parameters<typeof server.registerTool>[2],
+    );
+
+  registerLoggedTool(
     "list_nodes",
     { title: "List node types", description: "List every registered node type with its config schema and ports. Call this first; never guess node shapes.", inputSchema: {} },
     async () => json({ ok: true, types: svc.listTypes() }),
   );
 
-  server.registerTool(
+  registerLoggedTool(
     "get_node_schema",
     {
       title: "Get node schema",
@@ -34,7 +79,7 @@ export function createMcpServer(rt: Runtime): McpServer {
     async ({ type }) => json({ ok: true, ...svc.getNodeType(type) }),
   );
 
-  server.registerTool(
+  registerLoggedTool(
     "create_canvas",
     {
       title: "Create canvas",
@@ -44,7 +89,7 @@ export function createMcpServer(rt: Runtime): McpServer {
     async ({ name }) => json({ ok: true, canvas: svc.createCanvas(name) }),
   );
 
-  server.registerTool(
+  registerLoggedTool(
     "create_node",
     {
       title: "Create node",
@@ -63,7 +108,7 @@ export function createMcpServer(rt: Runtime): McpServer {
     },
   );
 
-  server.registerTool(
+  registerLoggedTool(
     "update_node",
     {
       title: "Update node",
@@ -77,7 +122,7 @@ export function createMcpServer(rt: Runtime): McpServer {
     async ({ canvasId, nodeId, data }) => json({ ok: true, node: svc.updateNode(canvasId, nodeId, data) }),
   );
 
-  server.registerTool(
+  registerLoggedTool(
     "delete_node",
     {
       title: "Delete node",
@@ -90,7 +135,7 @@ export function createMcpServer(rt: Runtime): McpServer {
     },
   );
 
-  server.registerTool(
+  registerLoggedTool(
     "create_edge",
     {
       title: "Create edge (wire)",
@@ -106,7 +151,7 @@ export function createMcpServer(rt: Runtime): McpServer {
     async (a) => json({ ok: true, edge: svc.createEdge(a.canvasId, a.sourceId, a.targetId, a.sourcePort, a.targetPort) }),
   );
 
-  server.registerTool(
+  registerLoggedTool(
     "delete_edge",
     {
       title: "Delete edge",
@@ -119,7 +164,7 @@ export function createMcpServer(rt: Runtime): McpServer {
     },
   );
 
-  server.registerTool(
+  registerLoggedTool(
     "validate_canvas",
     {
       title: "Validate canvas",
@@ -129,7 +174,7 @@ export function createMcpServer(rt: Runtime): McpServer {
     async ({ canvasId }) => json({ ok: true, ...svc.validateCanvas(canvasId) }),
   );
 
-  server.registerTool(
+  registerLoggedTool(
     "run_canvas",
     {
       title: "Run canvas",
@@ -145,7 +190,7 @@ export function createMcpServer(rt: Runtime): McpServer {
       json({ ok: true, ...(await svc.run(canvasId, startNodeId, message, sessionId ?? "sess_" + crypto.randomUUID())) }),
   );
 
-  server.registerTool(
+  registerLoggedTool(
     "test_agent",
     {
       title: "Test agent (multi-turn)",

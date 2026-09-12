@@ -56,14 +56,14 @@ where *an intention has no face*.
 
 ## What you can build
 
-OpenViveksha is not a concept or a demo — it is the runtime we use to run
-production agents.
+OpenViveksha is not a concept or a demo — it is built to the same
+spec that runs our production news site.
 
 With the 7 built-in nodes, plus your own node modules, you can build:
 
 - **Content pipelines** — an agent reads a source (changelog, RSS, a folder),
-  processes it, and produces digests or articles on a schedule. Our production
-  news site runs this way.
+  processes it, and produces digests or articles. Our production news site
+  runs this way.
 - **Assistants over your data** — expose your knowledge or business data
   through MCP tools and let the agent retrieve and use it when needed.
 - **Chat agents** — put a webhook or another channel in front, connect chat

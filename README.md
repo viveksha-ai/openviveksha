@@ -51,9 +51,36 @@ where *an intention has no face*.
   `validate_canvas` and `test_agent`. Everything an AI client needs to
   author, check, and run.
 - **7 nodes**: `channel`, `chat`, `chat-history`, `role`, `provider-llm`,
-  `tools`, `mcp`. Not enough? The executor tolerates any creation order and
-  any graph shape — write your own node modules and extend the runtime.
+  `tools`, `mcp`.
 - **Zero cloud.** SQLite storage, localhost HTTP, stdio MCP.
+
+## What you can build
+
+OpenViveksha is not a concept or a demo — it is the runtime we use to run
+production agents.
+
+With the 7 built-in nodes, plus your own node modules, you can build:
+
+- **Content pipelines** — an agent reads a source (changelog, RSS, a folder),
+  processes it, and produces digests or articles on a schedule. Our production
+  news site runs this way.
+- **Assistants over your data** — expose your knowledge or business data
+  through MCP tools and let the agent retrieve and use it when needed.
+- **Chat agents** — put a webhook or another channel in front, connect chat
+  history, and the runtime handles the conversation.
+- **Scheduled jobs** — trigger the HTTP API from cron or another scheduler and
+  let the agent perform the task and write the result.
+- **Tool-using agents** — the execution laws handle the tool loop: when the
+  model requests tools, the runtime executes them, feeds the results back,
+  and continues until no further tool calls are requested.
+
+The important part: these are not special-purpose features. They emerge from
+the same canvas, nodes, connections, and execution laws — one runtime,
+different forms of behavior. The executor tolerates any creation order and
+graph shape.
+
+Need a node we don't have? Ship it as a separate node module package —
+extend the runtime without forking it. See *Writing your own nodes* below.
 
 ## Quickstart
 

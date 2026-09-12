@@ -165,7 +165,9 @@ responses or traces. Details: `spec/canvas-spec.md`, `SECURITY.md`.
 A node is one object against a tiny contract (`src/types.ts`): a manifest, a
 JSON-Schema `dataSchema`, typed ports (`TXT`, `PROMPT`, `TOOLS`, `ANY`), and
 `execute(ctx)`. Register it, and AI clients can program with it immediately.
-Your package, your license — see `TRADEMARKS.md` for naming rules.
+Start from a working example: [openviveksha-node-starter](https://github.com/viveksha-ai/openviveksha-node-starter) —
+a minimal third-party package with tests and an end-to-end runner (clone →
+npm install → npm test). Your package, your license — see `TRADEMARKS.md` for naming rules.
 
 ## Project layout
 

@@ -152,6 +152,16 @@ The agentic tool loop is not hardcoded — it *emerges* from the execution
 laws: the `tools` node re-prompts, the executor's fixed point re-runs the
 `llm`, and the graph stabilizes when the model stops calling tools.
 
+### Agents that call other MCP servers
+
+The `mcp` node spawns any stdio/HTTP MCP server and feeds its tool
+definitions into a `tools` loop — so a programmed agent can call *other*
+MCP servers as tools, not just be programmed through one.
+`examples/security-agent.mjs` wires GSC (Git Security Checker, a read-only
+AppSec scanner exposing `scan_repo` / `scan_diff` / `list_findings`) as the
+tool provider and builds a security-review agent: `chat → role → tools ⇄
+provider-llm`, with `mcp → tools` feeding the scanner in.
+
 ## Trust boundary (read this)
 
 v0.1 is a local, single-user runtime. **A canvas is code**: `mcp.command`
@@ -176,6 +186,7 @@ spec/                 the language: node registry, canvas format, laws, MCP cont
 src/                  the runtime (TypeScript, Node 22+, SQLite)
 src/nodes/            the 7 built-in node modules
 examples/demo.mjs     deterministic demo: an MCP client builds an agent
+examples/security-agent.mjs  an agent that calls an external MCP server (GSC) as tools
 ```
 
 ## Links

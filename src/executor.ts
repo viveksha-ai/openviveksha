@@ -21,6 +21,7 @@ import type {
   TraceObservation,
 } from "./types.js";
 import type { NodeRegistry } from "./registry.js";
+import { resolveSecrets } from "./secrets.js";
 
 const MAX_STRING = 2000;
 const MAX_ITEMS = 50;
@@ -308,32 +309,33 @@ export class GraphExecutor {
         const sig = this.inputSignature(inputs);
         if (executedSig.get(nodeId) === sig && outputs.has(nodeId)) continue; // stable
 
-        const ctx = {
-          nodeId,
-          canvasId,
-          sessionId,
-          inputs,
-          data: node.data,
-          logger: console,
-          canvasApi: this.canvasApi,
-          httpApi: {
-            get: async (p: string) => (await fetch(p)).json(),
-            post: async (p: string, body: unknown) =>
-              (
-                await fetch(p, {
-                  method: "POST",
-                  headers: { "content-type": "application/json" },
-                  body: JSON.stringify(body ?? {}),
-                })
-              ).json(),
-          },
-          trace: collector.context,
-          toolsApi: this.toolsApi,
-        };
-
         collector.begin(nodeId, node.type, inputs);
         const t0 = performance.now();
         try {
+          const ctx = {
+            nodeId,
+            canvasId,
+            sessionId,
+            inputs,
+            // §12/§13 (issue #4): resolve ${ENV} secret fields into the in-memory
+            // run context only — the store keeps the ${ENV} references.
+            data: resolveSecrets(node.data, this.registry.getByType(node.type)?.secretFields ?? []),
+            logger: console,
+            canvasApi: this.canvasApi,
+            httpApi: {
+              get: async (p: string) => (await fetch(p)).json(),
+              post: async (p: string, body: unknown) =>
+                (
+                  await fetch(p, {
+                    method: "POST",
+                    headers: { "content-type": "application/json" },
+                    body: JSON.stringify(body ?? {}),
+                  })
+                ).json(),
+            },
+            trace: collector.context,
+            toolsApi: this.toolsApi,
+          };
           const result = await mod.execute(ctx);
           outputs.set(nodeId, result);
           executedSig.set(nodeId, sig);

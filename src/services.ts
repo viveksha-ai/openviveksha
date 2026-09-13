@@ -246,15 +246,6 @@ export class CanvasService {
 
   // ─── runs ───────────────────────────────────────────────────────────────────
 
-  /** Resolve ${ENV} refs in secret fields before execution (laws §11). */
-  private prepareSecrets(canvasId: string): void {
-    for (const node of this.rt.store.listNodes(canvasId)) {
-      const mod = this.rt.registry.getByType(node.type);
-      if (!mod?.secretFields?.length) continue;
-      this.rt.store.updateNode(node.id, resolveSecrets(node.data, mod.secretFields));
-    }
-  }
-
   resolveStartNodeId(canvasId: string, startNodeId?: string): string {
     if (startNodeId) {
       const node = this.rt.store.getNode(startNodeId);
@@ -278,7 +269,6 @@ export class CanvasService {
     message: string,
     sessionId: string,
   ): Promise<RunOutcome> {
-    this.prepareSecrets(canvasId);
     const start = this.resolveStartNodeId(canvasId, startNodeId);
     const res = await this.rt.executor.run({ canvasId, startNodeId: start, message, sessionId });
     if (this.rt.verbose) {

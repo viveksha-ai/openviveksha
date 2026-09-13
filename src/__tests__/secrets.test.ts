@@ -28,7 +28,11 @@ beforeEach(() => {
     category: "ai",
     summary: "x",
     secretFields: ["apiKey"],
-    dataSchema: { type: "object", properties: {}, required: [] },
+    dataSchema: {
+      type: "object",
+      properties: { apiKey: { type: "string" } },
+      required: ["name"],
+    },
     ports: {
       inputs: [{ name: "prompt", type: "PROMPT", required: true }],
       outputs: [{ name: "reply", type: "TXT", required: false }],
@@ -42,6 +46,30 @@ beforeEach(() => {
 afterEach(() => {
   rt.store.close();
   rmSync(dir, { recursive: true, force: true });
+});
+
+describe("dataSchema validation in create/update (issue #3)", () => {
+  it("createNode rejects a wrong-typed field, naming the field", () => {
+    const c = svc.createCanvas("t");
+    expect(() =>
+      svc.createNode(c.id, "test-secret", { name: "S", apiKey: 123 }),
+    ).toThrow('"apiKey" must be string');
+  });
+
+  it("updateNode rejects invalid data with a clear error", () => {
+    const c = svc.createCanvas("t");
+    const node = svc.createNode(c.id, "test-secret", { name: "S", apiKey: "${OVX_SEC_KEY}" });
+    expect(() =>
+      svc.updateNode(c.id, node.id, { name: "S", apiKey: false }),
+    ).toThrow('"apiKey" must be string');
+  });
+
+  it("required fields are enforced on create", () => {
+    const c = svc.createCanvas("t");
+    expect(() => svc.createNode(c.id, "test-secret", { apiKey: "x" })).toThrow(
+      /"name" is required/,
+    );
+  });
 });
 
 describe("secrets: store never persists resolved values (issue #4)", () => {

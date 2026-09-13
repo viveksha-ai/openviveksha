@@ -9,6 +9,7 @@
  */
 
 import type { NodeRegistry } from "./registry.js";
+import type { DataSchema } from "./types.js";
 
 const ENV_REF = /^\$\{([A-Z][A-Z0-9_]*)\}$/;
 
@@ -71,5 +72,52 @@ export function applyDefaults(
 export function effectiveData(registry: NodeRegistry, type: string, data: Record<string, unknown>) {
   const mod = registry.getByType(type);
   if (!mod) throw new Error(`unknown node type "${type}"`);
-  return applyDefaults(mod.dataSchema, data);
+  const out = applyDefaults(mod.dataSchema, data);
+  validateData(type, mod.dataSchema, out);
+  return out;
+}
+
+// ─── data validation (issue #3) ──────────────────────────────────────────────
+
+const JSON_TYPES: Record<string, (v: unknown) => boolean> = {
+  string: (v) => typeof v === "string",
+  number: (v) => typeof v === "number" && Number.isFinite(v),
+  boolean: (v) => typeof v === "boolean",
+  object: (v) => typeof v === "object" && v !== null && !Array.isArray(v),
+  array: (v) => Array.isArray(v),
+};
+
+/**
+ * Validate node data against the node's flat v0.1 JSON Schema
+ * (property types, enum, required). Throws a single error naming every
+ * offending field, so create/update rejects bad payloads before they
+ * reach execute() (issue #3).
+ */
+export function validateData(
+  type: string,
+  schema: DataSchema,
+  data: Record<string, unknown>,
+): void {
+  const errors: string[] = [];
+  for (const field of schema.required ?? []) {
+    if (data[field] === undefined) errors.push(`"${field}" is required`);
+  }
+  const props = (schema.properties ?? {}) as Record<
+    string,
+    { type?: string; enum?: unknown[] }
+  >;
+  for (const [field, def] of Object.entries(props)) {
+    if (data[field] === undefined) continue;
+    const check = def.type ? JSON_TYPES[def.type] : undefined;
+    if (check && !check(data[field])) {
+      errors.push(`"${field}" must be ${def.type}`);
+      continue;
+    }
+    if (Array.isArray(def.enum) && !def.enum.includes(data[field])) {
+      errors.push(`"${field}" must be one of: ${def.enum.map(String).join(", ")}`);
+    }
+  }
+  if (errors.length > 0) {
+    throw new Error(`${type}: invalid data — ${errors.join("; ")}`);
+  }
 }

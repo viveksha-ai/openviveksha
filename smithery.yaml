@@ -1,0 +1,21 @@
+# Smithery configuration: https://smithery.ai/docs/concepts/smithery-yaml
+# Lets Smithery index and launch the OpenViveksha MCP server (stdio).
+
+startCommand:
+  type: stdio
+  configSchema:
+    type: object
+    title: OpenViveksha MCP Server
+    description: Configuration for the OpenViveksha agent-runtime MCP server
+    properties:
+      dbPath:
+        type: string
+        title: Database Path
+        description: Path to the SQLite database file used by the runtime
+        default: ./agent.sqlite
+    required: []
+  commandFunction: |-
+    (config) => ({
+      command: 'node',
+      args: ['dist/cli.js', 'mcp', '--db', config.dbPath || './agent.sqlite']
+    })
